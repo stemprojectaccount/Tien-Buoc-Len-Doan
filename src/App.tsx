@@ -331,8 +331,19 @@ export default function App() {
 
   // Quiz state
   const [currentStep, setCurrentStep] = useState(0);
-  const [answers, setAnswers] = useState<{ [key: number]: string }>({});
+  const [answers, setAnswers] = useState<{ [key: number]: string }>(() => {
+    const saved = localStorage.getItem('quiz_progress');
+    return saved ? JSON.parse(saved) : {};
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+
+  // Save progress to localStorage
+  useEffect(() => {
+    if (Object.keys(answers).length > 0) {
+      localStorage.setItem('quiz_progress', JSON.stringify(answers));
+    }
+  }, [answers]);
 
   // Admin/History state
   const [results, setResults] = useState<QuizResult[]>([]);
@@ -428,6 +439,13 @@ export default function App() {
 
   // --- Session Management ---
   useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
+
+  useEffect(() => {
     const checkSession = async () => {
       const savedProfile = localStorage.getItem('student_profile');
       if (savedProfile) {
@@ -512,26 +530,45 @@ export default function App() {
 
   const handleRegister = async () => {
     if (!regName) return;
-    const uid = 'anon_' + Math.random().toString(36).substr(2, 9);
-    const newProfile: UserProfile = {
-      uid,
-      name: regName,
-      class: regClass,
-      role: 'student'
-    };
     
     try {
-      // Save to Firestore for persistence across devices/browsers if needed
-      await setDoc(doc(db, 'users', uid), newProfile);
-      setProfile(newProfile);
-      localStorage.setItem('student_profile', JSON.stringify(newProfile));
+      // Check if user already exists with this name and class
+      const q = query(
+        collection(db, 'users'), 
+        where('name', '==', regName), 
+        where('class', '==', regClass)
+      );
+      const querySnapshot = await getDocs(q);
+      
+      let userProfile: UserProfile;
+      
+      if (!querySnapshot.empty) {
+        // Use existing profile
+        const existingDoc = querySnapshot.docs[0];
+        userProfile = existingDoc.data() as UserProfile;
+        setNotification({ message: `Chào mừng em quay lại, ${userProfile.name}!`, type: 'success' });
+      } else {
+        // Create new profile
+        const uid = 'anon_' + Math.random().toString(36).substr(2, 9);
+        userProfile = {
+          uid,
+          name: regName,
+          class: regClass,
+          role: 'student'
+        };
+        await setDoc(doc(db, 'users', uid), userProfile);
+      }
+      
+      setProfile(userProfile);
+      localStorage.setItem('student_profile', JSON.stringify(userProfile));
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${uid}`);
+      handleFirestoreError(error, OperationType.WRITE, `users/lookup`);
     }
   };
 
   const handleStartQuiz = () => {
-    setAnswers({});
+    // We don't clear answers here anymore to support progress persistence
+    // If user wants to start fresh, they can do so after submitting or logging out
     setCurrentStep(0);
     setView('quiz');
   };
@@ -560,6 +597,8 @@ export default function App() {
     try {
       const resultRef = doc(collection(db, 'results'));
       await setDoc(resultRef, result);
+      localStorage.removeItem('quiz_progress');
+      setAnswers({});
       setView('history');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'results');
@@ -570,7 +609,9 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('student_profile');
+    localStorage.removeItem('quiz_progress');
     setProfile(null);
+    setAnswers({});
     signOut(auth);
     setView('home');
   };
@@ -711,6 +752,21 @@ export default function App() {
           </div>
         </nav>
 
+        {/* Notification Toast */}
+        <AnimatePresence>
+          {notification && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-6 py-3 bg-blue-600 text-white rounded-full shadow-xl font-bold flex items-center gap-2"
+            >
+              <CheckCircle size={18} />
+              {notification.message}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <main className="max-w-5xl mx-auto p-4 sm:p-6">
           <AnimatePresence mode="wait">
             {view === 'home' && (
@@ -733,14 +789,20 @@ export default function App() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between">
                     <div>
-                      <h3 className="text-2xl font-bold mb-4">Bắt đầu kiểm tra</h3>
-                      <p className="text-slate-500 mb-6">Thử thách bản thân với các câu hỏi trắc nghiệm và tự luận về Đoàn.</p>
+                      <h3 className="text-2xl font-bold mb-4">
+                        {Object.keys(answers).length > 0 ? 'Tiếp tục bài làm' : 'Bắt đầu kiểm tra'}
+                      </h3>
+                      <p className="text-slate-500 mb-6">
+                        {Object.keys(answers).length > 0 
+                          ? `Em đang làm dở bài thi (${Object.keys(answers).length}/${QUESTIONS.length} câu).` 
+                          : 'Thử thách bản thân với các câu hỏi trắc nghiệm và tự luận về Đoàn.'}
+                      </p>
                     </div>
                     <button 
                       onClick={handleStartQuiz}
                       className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
                     >
-                      Bắt đầu ngay <ChevronRight size={20} />
+                      {Object.keys(answers).length > 0 ? 'Tiếp tục ngay' : 'Bắt đầu ngay'} <ChevronRight size={20} />
                     </button>
                   </div>
                   
