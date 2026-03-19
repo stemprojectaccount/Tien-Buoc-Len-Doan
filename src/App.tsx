@@ -1,0 +1,1232 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs, 
+  query, 
+  where, 
+  onSnapshot,
+  orderBy,
+  Timestamp,
+  getDocFromServer,
+  deleteDoc
+} from 'firebase/firestore';
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  onAuthStateChanged, 
+  User as FirebaseUser,
+  signOut
+} from 'firebase/auth';
+import { db, auth } from './firebase';
+import { 
+  LogOut, 
+  User as UserIcon, 
+  BookOpen, 
+  CheckCircle, 
+  XCircle, 
+  ChevronRight, 
+  History, 
+  ShieldCheck,
+  ClipboardList,
+  AlertCircle,
+  Trophy,
+  X,
+  FileDown,
+  ChevronLeft,
+  Trash2
+} from 'lucide-react';
+import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } from 'docx';
+import { saveAs } from 'file-saver';
+import { motion, AnimatePresence } from 'motion/react';
+import Markdown from 'react-markdown';
+
+// --- Types ---
+interface UserProfile {
+  uid: string;
+  name: string;
+  class: '9A' | '9B' | '9C' | '9D';
+  role: 'student' | 'admin';
+}
+
+interface QuizQuestion {
+  id: number;
+  type: 'multiple-choice' | 'essay';
+  question: string;
+  options?: string[];
+  correctAnswer?: string;
+  explanation: string;
+  wordLimit?: number;
+}
+
+interface QuizResult {
+  id: string;
+  uid: string;
+  studentName: string;
+  studentClass: string;
+  answers: { [key: number]: string };
+  score: number;
+  timestamp: string;
+}
+
+// --- Constants ---
+const CLASSES = ['9A', '9B', '9C', '9D'] as const;
+
+const QUESTIONS: QuizQuestion[] = [
+  {
+    id: 1,
+    type: 'multiple-choice',
+    question: 'Bài ca chính thức của Đoàn TNCS Hồ Chí Minh là:',
+    options: ['Thanh niên làm theo lời Bác', 'Tiến lên đoàn viên', 'Tuổi trẻ thế hệ Bác Hồ', 'Lên đàng'],
+    correctAnswer: 'Thanh niên làm theo lời Bác',
+    explanation: 'Bài hát "Thanh niên làm theo lời Bác" (nhạc và lời của nhạc sĩ Hoàng Hòa) là bài ca chính thức của Đoàn.'
+  },
+  {
+    id: 2,
+    type: 'multiple-choice',
+    question: 'Đoàn TNCS Hồ Chí Minh tổ chức và hoạt động theo nguyên tắc nào?',
+    options: ['Tự do cá nhân', 'Tập trung dân chủ', 'Tự quản', 'Hiệp thương'],
+    correctAnswer: 'Tập trung dân chủ',
+    explanation: 'Nguyên tắc tập trung dân chủ là nguyên tắc tổ chức và hoạt động cơ bản của Đoàn.'
+  },
+  {
+    id: 3,
+    type: 'multiple-choice',
+    question: 'Đoàn TNCS Hồ Chí Minh được thành lập vào thời gian nào?',
+    options: ['26/3/1930', '26/3/1931', '2/9/1945', '3/2/1930'],
+    correctAnswer: '26/3/1931',
+    explanation: 'Ngày 26/3/1931 là ngày thành lập Đoàn TNCS Đông Dương (nay là Đoàn TNCS Hồ Chí Minh).'
+  },
+  {
+    id: 4,
+    type: 'multiple-choice',
+    question: 'Tên gọi đầu tiên của Đoàn Thanh niên Cộng sản Hồ Chí Minh là gì?',
+    options: ['Đoàn TNCS Việt Nam', 'Đoàn TNCS Đông Dương', 'Đoàn TN Phản đế Đông Dương', 'Đoàn TN Dân chủ Đông Dương'],
+    correctAnswer: 'Đoàn TNCS Đông Dương',
+    explanation: 'Tên gọi đầu tiên của Đoàn là Đoàn Thanh niên Cộng sản Đông Dương.'
+  },
+  {
+    id: 5,
+    type: 'multiple-choice',
+    question: 'Cơ quan lãnh đạo cao nhất của Đoàn TNCS Hồ Chí Minh là gì?',
+    options: ['Đại hội Đoàn toàn quốc', 'Ban Chấp hành', 'Ban Thường vụ', 'Đoàn cơ sở'],
+    correctAnswer: 'Đại hội Đoàn toàn quốc',
+    explanation: 'Cơ quan lãnh đạo cao nhất của Đoàn là Đại hội đại biểu toàn quốc.'
+  },
+  {
+    id: 6,
+    type: 'multiple-choice',
+    question: 'Màu sắc chủ đạo của huy hiệu Đoàn TNCS Hồ Chí Minh là gì?',
+    options: ['Màu xanh', 'Màu đỏ', 'Màu vàng', 'Màu trắng'],
+    correctAnswer: 'Màu đỏ',
+    explanation: 'Huy hiệu Đoàn có hình tròn, trên nền xanh lam là hình ảnh một cánh tay nắm chắc lá cờ Tổ quốc (màu đỏ) đang tung bay.'
+  },
+  {
+    id: 7,
+    type: 'multiple-choice',
+    question: 'Đoàn viên thanh niên cần có những phẩm chất nào sau đây?',
+    options: ['Thờ ơ, thiếu trách nhiệm', 'Năng động, có trách nhiệm trong học tập và hoạt động', 'Chỉ quan tâm đến bản thân', 'Ngại tham gia các hoạt động tập thể'],
+    correctAnswer: 'Năng động, có trách nhiệm trong học tập và hoạt động',
+    explanation: 'Đoàn viên cần gương mẫu, năng động và có trách nhiệm trong mọi hoạt động.'
+  },
+  {
+    id: 8,
+    type: 'multiple-choice',
+    question: 'Cơ quan lãnh đạo cao nhất của chi đoàn là gì?',
+    options: ['Ban Chấp hành chi đoàn', 'Đại hội đoàn viên', 'Đoàn cấp trên', 'Bí thư chi đoàn'],
+    correctAnswer: 'Đại hội đoàn viên',
+    explanation: 'Cơ quan lãnh đạo cao nhất của chi đoàn là Đại hội đoàn viên.'
+  },
+  {
+    id: 9,
+    type: 'multiple-choice',
+    question: 'Theo Điều lệ Đoàn TNCS Hồ Chí Minh, đoàn viên có bao nhiêu nhiệm vụ?',
+    options: ['3', '4', '5', '6'],
+    correctAnswer: '3',
+    explanation: 'Theo Điều lệ Đoàn, đoàn viên có 3 nhiệm vụ chính.'
+  },
+  {
+    id: 10,
+    type: 'multiple-choice',
+    question: 'Đâu là việc làm đúng của một đoàn viên thanh niên?',
+    options: ['Tham gia tích cực các hoạt động tập thể', 'Trốn tránh nhiệm vụ được giao', 'Không quan tâm đến tập thể', 'Vi phạm nội quy'],
+    correctAnswer: 'Tham gia tích cực các hoạt động tập thể',
+    explanation: 'Đoàn viên có nhiệm vụ tham gia tích cực vào các hoạt động của tổ chức Đoàn.'
+  },
+  {
+    id: 11,
+    type: 'multiple-choice',
+    question: 'Thanh niên trong độ tuổi nào thì đủ điều kiện được kết nạp vào Đoàn TNCS Hồ Chí Minh?',
+    options: ['Từ 14 đến 30 tuổi', 'Từ 15 đến 30 tuổi', 'Từ 16 đến 30 tuổi', 'Từ 18 đến 30 tuổi'],
+    correctAnswer: 'Từ 16 đến 30 tuổi',
+    explanation: 'Công dân Việt Nam từ đủ 16 tuổi đến 30 tuổi có đủ điều kiện theo Điều lệ Đoàn sẽ được kết nạp.'
+  },
+  {
+    id: 12,
+    type: 'multiple-choice',
+    question: 'Những nội dung nào sau đây thể hiện truyền thống của Đoàn TNCS Hồ Chí Minh?',
+    options: ['Trung thành với lý tưởng cách mạng', 'Không ngừng rèn luyện, cống hiến', 'Xung kích, sáng tạo trong hoạt động', 'Cả 3 đáp án trên'],
+    correctAnswer: 'Cả 3 đáp án trên',
+    explanation: 'Đoàn có truyền thống trung thành tuyệt đối, xung kích sáng tạo và không ngừng rèn luyện.'
+  },
+  {
+    id: 13,
+    type: 'multiple-choice',
+    question: 'Tháng Thanh niên hằng năm được tổ chức vào tháng nào?',
+    options: ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4'],
+    correctAnswer: 'Tháng 3',
+    explanation: 'Tháng 3 hằng năm được chọn là Tháng Thanh niên.'
+  },
+  {
+    id: 14,
+    type: 'multiple-choice',
+    question: 'Khẩu hiệu nào sau đây thể hiện rõ tinh thần xung kích của thanh niên Việt Nam?',
+    options: ['Học, học nữa, học mãi', 'Đâu cần thanh niên có, việc gì khó có thanh niên', 'Tiên học lễ, hậu học văn', 'Sống và làm việc theo pháp luật'],
+    correctAnswer: 'Đâu cần thanh niên có, việc gì khó có thanh niên',
+    explanation: 'Đây là khẩu hiệu hành động thể hiện tinh thần sẵn sàng cống hiến của thanh niên.'
+  },
+  {
+    id: 15,
+    type: 'multiple-choice',
+    question: 'Hiện nay, ai là Bí thư thứ nhất Trung ương Đoàn TNCS Hồ Chí Minh?',
+    options: ['Vũ Trọng Kim', 'Nguyễn Lam', 'Bùi Quang Huy', 'Vũ Mão'],
+    correctAnswer: 'Bùi Quang Huy',
+    explanation: 'Đồng chí Bùi Quang Huy hiện là Bí thư thứ nhất Trung ương Đoàn TNCS Hồ Chí Minh khóa XII.'
+  },
+  {
+    id: 16,
+    type: 'multiple-choice',
+    question: 'Đoàn TNCS Hồ Chí Minh là đội dự bị tin cậy của tổ chức nào?',
+    options: ['Nhà nước', 'Chính phủ', 'Đảng Cộng sản Việt Nam', 'Quốc hội'],
+    correctAnswer: 'Đảng Cộng sản Việt Nam',
+    explanation: 'Đoàn là đội dự bị tin cậy, là cánh tay đắc lực của Đảng Cộng sản Việt Nam.'
+  },
+  {
+    id: 17,
+    type: 'multiple-choice',
+    question: 'Đảng Cộng sản Việt Nam là tổ chức đại diện cho lợi ích của ai?',
+    options: ['Người giàu', 'Nhân dân lao động và dân tộc Việt Nam', 'Học sinh', 'Doanh nghiệp'],
+    correctAnswer: 'Nhân dân lao động và dân tộc Việt Nam',
+    explanation: 'Đảng đại diện cho lợi ích của giai cấp công nhân, nhân dân lao động và của cả dân tộc.'
+  },
+  {
+    id: 18,
+    type: 'multiple-choice',
+    question: 'Đảng Cộng sản Việt Nam được thành lập vào ngày nào?',
+    options: ['2/9/1945', '3/2/1930', '26/3/1931', '30/4/1975'],
+    correctAnswer: '3/2/1930',
+    explanation: 'Ngày 3/2/1930 là ngày thành lập Đảng Cộng sản Việt Nam.'
+  },
+  {
+    id: 19,
+    type: 'multiple-choice',
+    question: 'Ai là người sáng lập Đảng Cộng sản Việt Nam?',
+    options: ['Võ Nguyên Giáp', 'Phạm Văn Đồng', 'Hồ Chí Minh', 'Trường Chinh'],
+    correctAnswer: 'Hồ Chí Minh',
+    explanation: 'Chủ tịch Hồ Chí Minh là người sáng lập và rèn luyện Đảng Cộng sản Việt Nam.'
+  },
+  {
+    id: 20,
+    type: 'multiple-choice',
+    question: 'Mục tiêu phấn đấu của nhiều đoàn viên thanh niên là gì?',
+    options: ['Trở nên giàu có', ' Được nổi tiếng', 'Phấn đấu trở thành đảng viên Đảng Cộng sản Việt Nam', 'Không có mục tiêu'],
+    correctAnswer: 'Phấn đấu trở thành đảng viên Đảng Cộng sản Việt Nam',
+    explanation: 'Phấn đấu trở thành Đảng viên là mục tiêu cao cả của những đoàn viên ưu tú.'
+  },
+  {
+    id: 21,
+    type: 'essay',
+    question: 'Nêu lý do bạn muốn phấn đấu trở thành Đoàn viên TNCS Hồ Chí Minh',
+    wordLimit: 300,
+    explanation: 'Câu trả lời cần thể hiện được nhận thức về vai trò của Đoàn, lý tưởng cách mạng và mong muốn được rèn luyện, cống hiến trong tổ chức Đoàn.'
+  }
+];
+
+// --- Error Handling ---
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string;
+    email?: string;
+    emailVerified?: boolean;
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email || undefined,
+      emailVerified: auth.currentUser?.emailVerified,
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+// --- Components ---
+const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleError = (e: ErrorEvent) => {
+      try {
+        const parsed = JSON.parse(e.message);
+        if (parsed.error) setError(parsed.error);
+      } catch {
+        setError(e.message);
+      }
+    };
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-red-50 p-4">
+        <div className="bg-white p-6 rounded-2xl shadow-xl max-w-md w-full border border-red-100">
+          <div className="flex items-center gap-3 text-red-600 mb-4">
+            <AlertCircle size={24} />
+            <h2 className="text-xl font-bold">Đã xảy ra lỗi</h2>
+          </div>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-colors"
+          >
+            Tải lại trang
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return <>{children}</>;
+};
+
+export default function App() {
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'home' | 'quiz' | 'history' | 'admin'>('home');
+  
+  // Registration state
+  const [regName, setRegName] = useState('');
+  const [regClass, setRegClass] = useState<UserProfile['class']>('9A');
+
+  // Quiz state
+  const [currentStep, setCurrentStep] = useState(0);
+  const [answers, setAnswers] = useState<{ [key: number]: string }>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Admin/History state
+  const [results, setResults] = useState<QuizResult[]>([]);
+  const [selectedResult, setSelectedResult] = useState<QuizResult | null>(null);
+
+  const handleDeleteResult = async (id: string) => {
+    if (!window.confirm('Bạn có chắc chắn muốn xóa kết quả này không?')) return;
+    try {
+      await deleteDoc(doc(db, 'results', id));
+      // results will be updated automatically by onSnapshot
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `results/${id}`);
+    }
+  };
+
+  const downloadWordReport = async (result: QuizResult) => {
+    const doc = new Document({
+      sections: [
+        {
+          properties: {},
+          children: [
+            new Paragraph({
+              text: "BÁO CÁO KẾT QUẢ BÀI THI",
+              heading: HeadingLevel.HEADING_1,
+              alignment: AlignmentType.CENTER,
+            }),
+            new Paragraph({ text: "" }),
+            new Paragraph({
+              children: [
+                new TextRun({ text: `Họ và tên: `, bold: true }),
+                new TextRun({ text: result.studentName }),
+              ],
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({ text: `Lớp: `, bold: true }),
+                new TextRun({ text: result.studentClass }),
+              ],
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({ text: `Điểm trắc nghiệm: `, bold: true }),
+                new TextRun({ text: `${result.score}/${QUESTIONS.filter(q => q.type === 'multiple-choice').length}` }),
+              ],
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({ text: `Thời gian nộp bài: `, bold: true }),
+                new TextRun({ text: new Date(result.timestamp).toLocaleString('vi-VN') }),
+              ],
+            }),
+            new Paragraph({ text: "" }),
+            new Paragraph({
+              text: "CHI TIẾT BÀI LÀM",
+              heading: HeadingLevel.HEADING_2,
+            }),
+            new Paragraph({ text: "" }),
+            ...QUESTIONS.flatMap((q) => [
+              new Paragraph({
+                children: [
+                  new TextRun({ text: `Câu ${q.id}: ${q.question}`, bold: true }),
+                ],
+              }),
+              new Paragraph({
+                children: [
+                  new TextRun({ text: `Câu trả lời: `, bold: true }),
+                  new TextRun({ 
+                    text: result.answers[q.id] || '(Bỏ trống)',
+                    color: q.type === 'multiple-choice' 
+                      ? (result.answers[q.id] === q.correctAnswer ? "008000" : "FF0000")
+                      : "0000FF"
+                  }),
+                ],
+              }),
+              ...(q.type === 'multiple-choice' ? [
+                new Paragraph({
+                  children: [
+                    new TextRun({ text: `Đáp án đúng: `, bold: true }),
+                    new TextRun({ text: q.correctAnswer || '', italics: true }),
+                  ],
+                })
+              ] : []),
+              new Paragraph({ text: "" }),
+            ]),
+          ],
+        },
+      ],
+    });
+
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, `KetQua_${result.studentName.replace(/\s+/g, '_')}_${result.studentClass}.docx`);
+  };
+
+  // --- Session Management ---
+  useEffect(() => {
+    const checkSession = async () => {
+      const savedProfile = localStorage.getItem('student_profile');
+      if (savedProfile) {
+        const parsed = JSON.parse(savedProfile) as UserProfile;
+        setProfile(parsed);
+        // Also check if they are logged in as admin
+        onAuthStateChanged(auth, (u) => {
+          setUser(u);
+          if (u && u.email === 'pn9055162@gmail.com') {
+            setProfile(prev => prev ? { ...prev, role: 'admin' } : null);
+          }
+        });
+      }
+      setLoading(false);
+    };
+    checkSession();
+  }, []);
+
+  // --- Connection Test ---
+  useEffect(() => {
+    async function testConnection() {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration.");
+        }
+      }
+    }
+    testConnection();
+  }, []);
+
+  // --- Data Fetching ---
+  useEffect(() => {
+    // Fetch results based on profile or view
+    let q;
+    if (view === 'admin' || profile?.role === 'admin') {
+      q = query(collection(db, 'results'), orderBy('timestamp', 'desc'));
+    } else if (profile) {
+      q = query(collection(db, 'results'), where('uid', '==', profile.uid), orderBy('timestamp', 'desc'));
+    } else {
+      return;
+    }
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as QuizResult));
+      setResults(data);
+    }, (error) => {
+      // If it's a permission error, it might be because they aren't admin
+      console.warn('Snapshot error (possibly not admin):', error);
+    });
+
+    return unsubscribe;
+  }, [profile, view]);
+
+  // --- Actions ---
+  const handleShowLeaderboard = () => {
+    setView('admin');
+  };
+
+  const handleLoginAdmin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      // Profile update will happen in onAuthStateChanged or manually
+      const u = auth.currentUser;
+      if (u && u.email === 'pn9055162@gmail.com') {
+        const adminProfile: UserProfile = {
+          uid: u.uid,
+          name: 'Giáo viên',
+          class: '9A',
+          role: 'admin'
+        };
+        setProfile(adminProfile);
+        localStorage.setItem('student_profile', JSON.stringify(adminProfile));
+        setView('admin');
+      }
+    } catch (error) {
+      console.error('Admin login error:', error);
+    }
+  };
+
+  const handleRegister = async () => {
+    if (!regName) return;
+    const uid = 'anon_' + Math.random().toString(36).substr(2, 9);
+    const newProfile: UserProfile = {
+      uid,
+      name: regName,
+      class: regClass,
+      role: 'student'
+    };
+    
+    try {
+      // Save to Firestore for persistence across devices/browsers if needed
+      await setDoc(doc(db, 'users', uid), newProfile);
+      setProfile(newProfile);
+      localStorage.setItem('student_profile', JSON.stringify(newProfile));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${uid}`);
+    }
+  };
+
+  const handleStartQuiz = () => {
+    setAnswers({});
+    setCurrentStep(0);
+    setView('quiz');
+  };
+
+  const handleSubmitQuiz = async () => {
+    if (!profile) return;
+    setIsSubmitting(true);
+    
+    // Calculate score for multiple choice
+    let score = 0;
+    QUESTIONS.forEach(q => {
+      if (q.type === 'multiple-choice' && answers[q.id] === q.correctAnswer) {
+        score++;
+      }
+    });
+
+    const result: Omit<QuizResult, 'id'> = {
+      uid: profile.uid,
+      studentName: profile.name,
+      studentClass: profile.class,
+      answers,
+      score,
+      timestamp: new Date().toISOString()
+    };
+
+    try {
+      const resultRef = doc(collection(db, 'results'));
+      await setDoc(resultRef, result);
+      setView('history');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'results');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('student_profile');
+    setProfile(null);
+    signOut(auth);
+    setView('home');
+  };
+
+  // --- Render Helpers ---
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-white rounded-3xl shadow-2xl max-w-md w-full border border-slate-100 overflow-hidden"
+        >
+          <div className="relative bg-white">
+            <img 
+              src="https://i.postimg.cc/wv5GXLcY/z7636268845552_ebe5719428f26261e75d485ce4957fcc.jpg" 
+              alt="Banner" 
+              className="w-full h-auto block"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+          
+          <div className="p-8 pt-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shrink-0">
+                <UserIcon className="text-white" size={24} />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 leading-tight">Tiến Bước Lên Đoàn</h2>
+                <p className="text-slate-500 text-xs font-medium">Nhập thông tin để bắt đầu làm bài</p>
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Họ và tên</label>
+                <input 
+                  type="text" 
+                  value={regName}
+                  onChange={(e) => setRegName(e.target.value)}
+                  placeholder="Nhập họ và tên của em"
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Lớp</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {CLASSES.map(c => (
+                    <button
+                      key={c}
+                      onClick={() => setRegClass(c)}
+                      className={`py-3 rounded-xl font-bold transition-all ${
+                        regClass === c 
+                          ? 'bg-blue-600 text-white shadow-md' 
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button 
+                onClick={handleRegister}
+                disabled={!regName}
+                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed mt-4 active:scale-95"
+              >
+                Vào làm bài
+              </button>
+
+              <div className="pt-6 border-t border-slate-100">
+                <button 
+                  onClick={handleShowLeaderboard}
+                  className="w-full py-2 text-slate-400 hover:text-blue-600 text-xs font-bold uppercase tracking-widest transition-all"
+                >
+                  Xem Lịch Sử & Xếp Hạng
+                </button>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  return (
+    <ErrorBoundary>
+      <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+        {/* Navigation */}
+        <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
+          <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('home')}>
+              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                <BookOpen className="text-white" size={18} />
+              </div>
+              <span className="font-bold text-lg hidden sm:block">Tiến Bước Lên Đoàn</span>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={() => setView('history')}
+                className={`p-2 rounded-xl transition-colors ${view === 'history' ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-100'}`}
+                title="Lịch sử"
+              >
+                <History size={20} />
+              </button>
+              {profile.role === 'admin' && (
+                <button 
+                  onClick={() => setView('admin')}
+                  className={`p-2 rounded-xl transition-colors ${view === 'admin' ? 'bg-purple-50 text-purple-600' : 'text-slate-500 hover:bg-slate-100'}`}
+                  title="Quản trị"
+                >
+                  <ShieldCheck size={20} />
+                </button>
+              )}
+              <div className="h-8 w-[1px] bg-slate-200 mx-1"></div>
+              <div className="flex items-center gap-2">
+                <div className="text-right hidden xs:block">
+                  <p className="text-xs font-bold leading-tight">{profile.name}</p>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">{profile.class}</p>
+                </div>
+                <button 
+                  onClick={handleLogout}
+                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                >
+                  <LogOut size={18} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </nav>
+
+        <main className="max-w-5xl mx-auto p-4 sm:p-6">
+          <AnimatePresence mode="wait">
+            {view === 'home' && (
+              <motion.div 
+                key="home"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-6"
+              >
+                <div className="relative rounded-3xl overflow-hidden shadow-2xl bg-white">
+                  <img 
+                    src="https://i.postimg.cc/wv5GXLcY/z7636268845552_ebe5719428f26261e75d485ce4957fcc.jpg" 
+                    alt="Tiến Bước Lên Đoàn" 
+                    className="w-full h-auto block"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                    <div>
+                      <h3 className="text-2xl font-bold mb-4">Bắt đầu kiểm tra</h3>
+                      <p className="text-slate-500 mb-6">Thử thách bản thân với các câu hỏi trắc nghiệm và tự luận về Đoàn.</p>
+                    </div>
+                    <button 
+                      onClick={handleStartQuiz}
+                      className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
+                    >
+                      Bắt đầu ngay <ChevronRight size={20} />
+                    </button>
+                  </div>
+                  
+                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                    <div>
+                      <h3 className="text-2xl font-bold mb-4">Lịch sử của em</h3>
+                      <p className="text-slate-500 mb-6">Xem lại các bài làm cũ, điểm số và lời giải thích chi tiết.</p>
+                    </div>
+                    <button 
+                      onClick={() => setView('history')}
+                      className="w-full py-4 bg-slate-100 text-slate-900 rounded-2xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                    >
+                      Xem lịch sử <History size={20} />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {view === 'quiz' && (
+              <motion.div 
+                key="quiz"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="max-w-2xl mx-auto"
+              >
+                <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100">
+                  {/* Enhanced Progress Indicator */}
+                  <div className="bg-slate-50 border-b border-slate-100 p-4">
+                    <div className="flex justify-between items-center mb-4 px-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">
+                          {currentStep + 1}
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Đang làm câu</p>
+                          <p className="text-sm font-bold text-slate-900 leading-none">{currentStep + 1} / {QUESTIONS.length}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Tiến độ</p>
+                        <p className="text-sm font-bold text-blue-600 leading-none">{Math.round(((Object.keys(answers).length) / QUESTIONS.length) * 100)}%</p>
+                      </div>
+                    </div>
+                    
+                    <div className="h-1.5 bg-slate-200 w-full rounded-full overflow-hidden mb-4">
+                      <motion.div 
+                        className="h-full bg-blue-600"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${((currentStep + 1) / QUESTIONS.length) * 100}%` }}
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 justify-center">
+                      {QUESTIONS.map((q, idx) => (
+                        <button
+                          key={q.id}
+                          onClick={() => setCurrentStep(idx)}
+                          className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center border ${
+                            currentStep === idx 
+                              ? 'bg-blue-600 border-blue-600 text-white shadow-md scale-110 z-10' 
+                              : answers[q.id] 
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-600' 
+                                : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'
+                          }`}
+                        >
+                          {idx + 1}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  <div className="p-8">
+                    <div className="flex justify-between items-center mb-6">
+                      <div className="flex items-center gap-2">
+                        {QUESTIONS[currentStep].type === 'multiple-choice' ? (
+                          <div className="px-2 py-1 bg-amber-100 text-amber-700 rounded text-[10px] font-black uppercase tracking-widest">Trắc nghiệm</div>
+                        ) : (
+                          <div className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-[10px] font-black uppercase tracking-widest">Tự luận</div>
+                        )}
+                      </div>
+                      {QUESTIONS[currentStep].type === 'essay' && (
+                        <div className="flex items-center gap-1.5 text-purple-600">
+                          <AlertCircle size={14} />
+                          <span className="text-[10px] font-bold uppercase tracking-widest">Câu hỏi quan trọng</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <h2 className="text-xl sm:text-2xl font-bold text-slate-900 mb-8 leading-tight">
+                      {QUESTIONS[currentStep].question}
+                    </h2>
+
+                    {QUESTIONS[currentStep].type === 'multiple-choice' ? (
+                      <div className="space-y-3">
+                        {QUESTIONS[currentStep].options?.map((option, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setAnswers({ ...answers, [QUESTIONS[currentStep].id]: option })}
+                            className={`w-full text-left p-5 rounded-2xl border-2 transition-all flex items-center justify-between group ${
+                              answers[QUESTIONS[currentStep].id] === option
+                                ? 'border-blue-600 bg-blue-50 text-blue-900'
+                                : 'border-slate-100 hover:border-slate-200 text-slate-600'
+                            }`}
+                          >
+                            <span className="font-medium">{option}</span>
+                            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                              answers[QUESTIONS[currentStep].id] === option
+                                ? 'border-blue-600 bg-blue-600'
+                                : 'border-slate-200'
+                            }`}>
+                              {answers[QUESTIONS[currentStep].id] === option && <CheckCircle size={14} className="text-white" />}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <textarea
+                          value={answers[QUESTIONS[currentStep].id] || ''}
+                          onChange={(e) => {
+                            const text = e.target.value;
+                            const words = text.trim().split(/\s+/).filter(w => w.length > 0);
+                            const limit = QUESTIONS[currentStep].wordLimit || 300;
+                            
+                            if (words.length <= limit || text.length < (answers[QUESTIONS[currentStep].id] || '').length) {
+                              setAnswers({ ...answers, [QUESTIONS[currentStep].id]: text });
+                            }
+                          }}
+                          placeholder="Nhập câu trả lời của em tại đây..."
+                          className="w-full h-48 p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-600 focus:ring-0 outline-none transition-all resize-none font-medium"
+                        />
+                        <div className="flex justify-between items-center px-2">
+                          <p className="text-xs text-slate-400">
+                            Giới hạn: <span className="font-bold">{QUESTIONS[currentStep].wordLimit || 300} từ</span>
+                          </p>
+                          <p className={`text-xs font-bold ${
+                            (answers[QUESTIONS[currentStep].id] || '').trim().split(/\s+/).filter(w => w.length > 0).length > (QUESTIONS[currentStep].wordLimit || 300)
+                              ? 'text-red-500'
+                              : 'text-slate-400'
+                          }`}>
+                            {(answers[QUESTIONS[currentStep].id] || '').trim().split(/\s+/).filter(w => w.length > 0).length} / {QUESTIONS[currentStep].wordLimit || 300} từ
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="mt-10 flex flex-col gap-4">
+                      {QUESTIONS[currentStep].type === 'essay' && (
+                        <div className="p-4 bg-purple-50 border border-purple-100 rounded-2xl flex items-start gap-3">
+                          <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 shrink-0">
+                            <ShieldCheck size={18} />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-purple-900 mb-0.5">Lời khuyên dành cho em</p>
+                            <p className="text-xs text-purple-700 leading-relaxed">Hãy trình bày suy nghĩ của mình một cách chân thành nhất. Đây là phần quan trọng để thầy cô hiểu thêm về tâm tư, nguyện vọng của em.</p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex gap-3">
+                        {currentStep > 0 && (
+                          <button 
+                            onClick={() => setCurrentStep(currentStep - 1)}
+                            className="flex-1 py-4 bg-slate-100 text-slate-900 rounded-2xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                          >
+                            <ChevronLeft size={20} />
+                            Quay lại
+                          </button>
+                        )}
+                        {currentStep < QUESTIONS.length - 1 ? (
+                          <button 
+                            onClick={() => setCurrentStep(currentStep + 1)}
+                            disabled={!answers[QUESTIONS[currentStep].id]}
+                            className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                          >
+                            Tiếp theo
+                            <ChevronRight size={20} />
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={handleSubmitQuiz}
+                            disabled={isSubmitting || !answers[QUESTIONS[currentStep].id]}
+                            className="flex-[2] py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-emerald-200"
+                          >
+                            {isSubmitting ? (
+                              <>
+                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                Đang nộp bài...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle size={20} />
+                                Hoàn thành & Nộp bài
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {view === 'history' && (
+              <motion.div 
+                key="history"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="space-y-6"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-2xl font-bold">Lịch sử làm bài</h2>
+                  <button 
+                    onClick={handleStartQuiz}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all"
+                  >
+                    Làm bài mới
+                  </button>
+                </div>
+
+                {results.length === 0 ? (
+                  <div className="bg-white p-12 rounded-3xl text-center border border-slate-100">
+                    <ClipboardList size={48} className="mx-auto text-slate-300 mb-4" />
+                    <p className="text-slate-500">Em chưa có bài làm nào. Hãy bắt đầu ngay!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {results.map((result) => (
+                      <div key={result.id} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+                        <div className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
+                          <div>
+                            <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
+                              {new Date(result.timestamp).toLocaleString('vi-VN')}
+                            </p>
+                            <h3 className="text-lg font-bold">Kết quả bài làm</h3>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button 
+                              onClick={() => downloadWordReport(result)}
+                              className="p-3 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-2xl transition-colors flex items-center gap-2 text-xs font-bold"
+                            >
+                              <FileDown size={18} />
+                              Tải Word
+                            </button>
+                            <div className="text-right">
+                              <p className="text-2xl font-black text-blue-600">{result.score}/{QUESTIONS.filter(q => q.type === 'multiple-choice').length}</p>
+                              <p className="text-[10px] text-slate-400 uppercase font-bold">Điểm trắc nghiệm</p>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="p-6 space-y-6">
+                          {QUESTIONS.map((q) => (
+                            <div key={q.id} className="border-b border-slate-100 last:border-0 pb-6 last:pb-0">
+                              <div className="flex items-start gap-3 mb-3">
+                                <span className="w-6 h-6 bg-slate-100 rounded-lg flex items-center justify-center text-xs font-bold text-slate-500 shrink-0 mt-1">{q.id}</span>
+                                <p className="font-bold text-slate-800">{q.question}</p>
+                              </div>
+                              
+                              <div className="ml-9 space-y-3">
+                                <div className={`p-4 rounded-2xl flex items-center justify-between ${
+                                  q.type === 'multiple-choice' 
+                                    ? result.answers[q.id] === q.correctAnswer 
+                                      ? 'bg-green-50 text-green-800 border border-green-100' 
+                                      : 'bg-red-50 text-red-800 border border-red-100'
+                                    : 'bg-blue-50 text-blue-800 border border-blue-100'
+                                }`}>
+                                  <div>
+                                    <p className="text-[10px] uppercase font-black opacity-60 mb-1">Câu trả lời của em</p>
+                                    <p className="font-medium">{result.answers[q.id] || '(Bỏ trống)'}</p>
+                                  </div>
+                                  {q.type === 'multiple-choice' && (
+                                    result.answers[q.id] === q.correctAnswer ? <CheckCircle size={20} /> : <XCircle size={20} />
+                                  )}
+                                </div>
+
+                                {q.type === 'multiple-choice' && result.answers[q.id] !== q.correctAnswer && (
+                                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                    <p className="text-[10px] uppercase font-black text-slate-400 mb-1">Đáp án đúng</p>
+                                    <p className="font-bold text-slate-700">{q.correctAnswer}</p>
+                                  </div>
+                                )}
+
+                                <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
+                                  <p className="text-[10px] uppercase font-black text-amber-600 mb-1">Giải thích</p>
+                                  <div className="text-sm text-amber-900 leading-relaxed">
+                                    <Markdown>{q.explanation}</Markdown>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {view === 'admin' && (
+              <motion.div 
+                key="admin"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="space-y-6"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-2xl font-bold">Bảng thành tích học sinh</h2>
+                  <div className="flex gap-2">
+                    <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">Tổng số: {results.length}</span>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-100">
+                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest w-16">Hạng</th>
+                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Học sinh</th>
+                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Lớp</th>
+                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Điểm TN</th>
+                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Thời gian</th>
+                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Hành động</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {results
+                          .slice()
+                          .sort((a, b) => {
+                            if (b.score !== a.score) return b.score - a.score;
+                            return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+                          })
+                          .map((res, idx) => (
+                          <tr key={res.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                            <td className="p-4">
+                              <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs ${
+                                idx === 0 ? 'bg-amber-100 text-amber-700' :
+                                idx === 1 ? 'bg-slate-200 text-slate-700' :
+                                idx === 2 ? 'bg-orange-100 text-orange-700' :
+                                'bg-slate-50 text-slate-400'
+                              }`}>
+                                {idx + 1}
+                              </div>
+                            </td>
+                            <td className="p-4 font-bold text-slate-900">{res.studentName}</td>
+                            <td className="p-4"><span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-black uppercase">{res.studentClass}</span></td>
+                            <td className="p-4 font-black text-blue-600">{res.score}/{QUESTIONS.filter(q => q.type === 'multiple-choice').length}</td>
+                            <td className="p-4 text-xs text-slate-500">{new Date(res.timestamp).toLocaleString('vi-VN')}</td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-2">
+                                <button 
+                                  onClick={() => setSelectedResult(res)}
+                                  className="text-blue-600 hover:text-blue-800 text-sm font-bold flex items-center gap-1"
+                                >
+                                  Chi tiết <ChevronRight size={14} />
+                                </button>
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    downloadWordReport(res);
+                                  }}
+                                  className="p-2 bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-600 rounded-lg transition-colors"
+                                  title="Tải về file Word"
+                                >
+                                  <FileDown size={16} />
+                                </button>
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteResult(res.id);
+                                  }}
+                                  className="p-2 bg-slate-100 text-slate-600 hover:bg-red-100 hover:text-red-600 rounded-lg transition-colors"
+                                  title="Xóa kết quả"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Detail Modal Overlay */}
+                <AnimatePresence>
+                  {selectedResult && (
+                    <motion.div 
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                      onClick={() => setSelectedResult(null)}
+                    >
+                      <motion.div 
+                        initial={{ scale: 0.9, y: 20 }}
+                        animate={{ scale: 1, y: 0 }}
+                        exit={{ scale: 0.9, y: 20 }}
+                        className="bg-white rounded-3xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                          <div>
+                            <h3 className="text-xl font-bold text-slate-900">{selectedResult.studentName}</h3>
+                            <p className="text-xs text-slate-500 font-medium">Lớp {selectedResult.studentClass} • {new Date(selectedResult.timestamp).toLocaleString('vi-VN')}</p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button 
+                              onClick={() => downloadWordReport(selectedResult)}
+                              className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl transition-colors flex items-center gap-2 text-xs font-bold"
+                            >
+                              <FileDown size={16} />
+                              Tải Word
+                            </button>
+                            <button 
+                              onClick={() => setSelectedResult(null)}
+                              className="p-2 hover:bg-slate-200 rounded-full transition-all"
+                            >
+                              <X size={24} className="text-slate-500" />
+                            </button>
+                          </div>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 text-center">
+                              <p className="text-xs font-black text-blue-600 uppercase tracking-widest mb-1">Điểm trắc nghiệm</p>
+                              <p className="text-3xl font-black text-blue-900">{selectedResult.score}/{QUESTIONS.filter(q => q.type === 'multiple-choice').length}</p>
+                            </div>
+                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-center">
+                              <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Xếp hạng</p>
+                              <p className="text-3xl font-black text-slate-900">
+                                #{results.slice().sort((a,b) => b.score - a.score).findIndex(r => r.id === selectedResult.id) + 1}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="space-y-6">
+                            <h4 className="font-black text-slate-400 uppercase tracking-widest text-xs">Chi tiết câu trả lời</h4>
+                            {QUESTIONS.map((q) => (
+                              <div key={q.id} className="border-b border-slate-100 last:border-0 pb-6 last:pb-0">
+                                <div className="flex items-start gap-3 mb-3">
+                                  <span className="w-6 h-6 bg-slate-100 rounded-lg flex items-center justify-center text-xs font-bold text-slate-500 shrink-0 mt-1">{q.id}</span>
+                                  <p className="font-bold text-slate-800">{q.question}</p>
+                                </div>
+                                
+                                <div className="ml-9 space-y-3">
+                                  <div className={`p-4 rounded-2xl ${
+                                    q.type === 'multiple-choice' 
+                                      ? selectedResult.answers[q.id] === q.correctAnswer 
+                                        ? 'bg-green-50 text-green-800 border border-green-100' 
+                                        : 'bg-red-50 text-red-800 border border-red-100'
+                                      : 'bg-blue-50 text-blue-800 border border-blue-100'
+                                  }`}>
+                                    <p className="text-[10px] uppercase font-black opacity-60 mb-1">Câu trả lời của học sinh</p>
+                                    <p className="font-medium">{selectedResult.answers[q.id] || '(Bỏ trống)'}</p>
+                                  </div>
+
+                                  {q.type === 'multiple-choice' && selectedResult.answers[q.id] !== q.correctAnswer && (
+                                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                      <p className="text-[10px] uppercase font-black text-slate-400 mb-1">Đáp án đúng</p>
+                                      <p className="font-bold text-slate-700">{q.correctAnswer}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </motion.div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </main>
+      </div>
+    </ErrorBoundary>
+  );
+}

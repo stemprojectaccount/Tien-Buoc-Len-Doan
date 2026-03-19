@@ -1,0 +1,40 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Student user profile",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "class": { "type": "string", "enum": ["9A", "9B", "9C", "9D"] },
+        "role": { "type": "string", "enum": ["student", "admin"] }
+      },
+      "required": ["uid", "name", "class", "role"]
+    },
+    "QuizResult": {
+      "title": "QuizResult",
+      "description": "Student quiz submission",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "studentName": { "type": "string" },
+        "studentClass": { "type": "string" },
+        "answers": { "type": "array" },
+        "score": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "studentName", "studentClass", "answers", "score", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/results/{resultId}": {
+      "schema": "QuizResult",
+      "description": "Quiz results"
+    }
+  }
+}

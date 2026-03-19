@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "pn9055162@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasOnly(['uid', 'name', 'class', 'role']) &&
+             data.uid is string && data.uid.size() < 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.class in ['9A', '9B', '9C', '9D'] &&
+             data.role in ['student', 'admin'];
+    }
+
+    function isValidResult(data) {
+      return data.keys().hasOnly(['uid', 'studentName', 'studentClass', 'answers', 'score', 'timestamp']) &&
+             data.uid is string && data.uid.size() < 128 &&
+             data.studentName is string && data.studentName.size() < 100 &&
+             data.studentClass is string &&
+             data.answers is map && data.answers.size() <= 21 &&
+             data.score is number && data.score >= 0 && data.score <= 20 &&
+             data.timestamp is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if true; // Allow reading profiles for history lookup
+      allow create: if isValidUser(request.resource.data);
+      allow update: if isValidUser(request.resource.data);
+    }
+
+    match /results/{resultId} {
+      allow read: if true; // Allow reading results for history and admin view
+      allow create: if isValidResult(request.resource.data);
+      allow update: if false; // Results are immutable
+      allow delete: if isAdmin();
+    }
+  }
+}
