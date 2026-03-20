@@ -12,22 +12,11 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "pn9055162@gmail.com" && request.auth.token.email_verified == true));
-    }
-
-    function hasRequiredFields(fields) {
-      return request.resource.data.keys().hasAll(fields);
-    }
-
     function isValidUser(data) {
-      return data.keys().hasOnly(['uid', 'name', 'class', 'role']) &&
+      return data.keys().hasOnly(['uid', 'name', 'class']) &&
              data.uid is string && data.uid.size() < 128 &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.class in ['9A', '9B', '9C', '9D'] &&
-             data.role in ['student', 'admin'];
+             data.class in ['9A', '9B', '9C', '9D'];
     }
 
     function isValidResult(data) {
@@ -45,16 +34,16 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if true; // Allow reading profiles for history lookup
+      allow read: if true;
       allow create: if isValidUser(request.resource.data);
       allow update: if isValidUser(request.resource.data);
     }
 
     match /results/{resultId} {
-      allow read: if true; // Allow reading results for history and admin view
+      allow read: if true;
       allow create: if isValidResult(request.resource.data);
       allow update: if false; // Results are immutable
-      allow delete: if isAdmin();
+      allow delete: if false; // No one can delete results
     }
   }
 }

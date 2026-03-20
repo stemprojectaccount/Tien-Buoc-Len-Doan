@@ -599,6 +599,7 @@ export default function App() {
       await setDoc(resultRef, result);
       localStorage.removeItem('quiz_progress');
       setAnswers({});
+      setSelectedResult({ id: resultRef.id, ...result });
       setView('history');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'results');
@@ -625,7 +626,7 @@ export default function App() {
     );
   }
 
-  if (!profile) {
+  if (!profile && view !== 'admin') {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
         <motion.div 
@@ -719,34 +720,52 @@ export default function App() {
             </div>
             
             <div className="flex items-center gap-4">
-              <button 
-                onClick={() => setView('history')}
-                className={`p-2 rounded-xl transition-colors ${view === 'history' ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-100'}`}
-                title="Lịch sử"
-              >
-                <History size={20} />
-              </button>
-              {profile.role === 'admin' && (
+              <div className="flex items-center gap-1 bg-white border border-blue-200 rounded-full px-3 py-1.5 shadow-sm">
                 <button 
-                  onClick={() => setView('admin')}
-                  className={`p-2 rounded-xl transition-colors ${view === 'admin' ? 'bg-purple-50 text-purple-600' : 'text-slate-500 hover:bg-slate-100'}`}
-                  title="Quản trị"
+                  onClick={() => setView('history')}
+                  className={`p-1.5 rounded-lg transition-all ${view === 'history' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-blue-600 hover:bg-slate-50'}`}
+                  title="Lịch sử"
                 >
-                  <ShieldCheck size={20} />
+                  <History size={20} />
                 </button>
-              )}
+                {(profile?.role === 'admin' || view === 'admin') && (
+                  <>
+                    <div className="w-[1px] h-4 bg-slate-200 mx-0.5"></div>
+                    <button 
+                      onClick={() => setView('admin')}
+                      className={`p-1.5 rounded-lg transition-all ${view === 'admin' ? 'bg-purple-50 text-purple-600' : 'text-slate-400 hover:text-purple-600 hover:bg-slate-50'}`}
+                      title="Quản trị"
+                    >
+                      <ShieldCheck size={20} />
+                    </button>
+                  </>
+                )}
+              </div>
               <div className="h-8 w-[1px] bg-slate-200 mx-1"></div>
               <div className="flex items-center gap-2">
-                <div className="text-right hidden xs:block">
-                  <p className="text-xs font-bold leading-tight">{profile.name}</p>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">{profile.class}</p>
-                </div>
-                <button 
-                  onClick={handleLogout}
-                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                >
-                  <LogOut size={18} />
-                </button>
+                {profile ? (
+                  <>
+                    <div className="text-right hidden xs:block">
+                      <p className="text-xs font-bold leading-tight">{profile.name}</p>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider">{profile.class}</p>
+                    </div>
+                    <button 
+                      onClick={handleLogout}
+                      className="flex items-center gap-2 px-4 py-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all border border-slate-100 hover:border-red-100 font-medium"
+                    >
+                      <LogOut size={20} />
+                      <span className="hidden sm:inline">Đăng xuất</span>
+                    </button>
+                  </>
+                ) : (
+                  <button 
+                    onClick={() => setView('home')}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-bold shadow-sm"
+                  >
+                    <UserIcon size={18} />
+                    <span>Đăng ký</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1018,7 +1037,17 @@ export default function App() {
                 className="space-y-6"
               >
                 <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-2xl font-bold">Lịch sử làm bài</h2>
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={() => setView('home')}
+                      className="p-2 hover:bg-slate-100 rounded-full transition-all text-slate-500 flex items-center gap-1"
+                      title="Quay lại"
+                    >
+                      <ChevronLeft size={24} />
+                      <span className="text-sm font-bold hidden sm:inline">Quay lại</span>
+                    </button>
+                    <h2 className="text-2xl font-bold">Lịch sử làm bài</h2>
+                  </div>
                   <button 
                     onClick={handleStartQuiz}
                     className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all"
@@ -1033,63 +1062,341 @@ export default function App() {
                     <p className="text-slate-500">Em chưa có bài làm nào. Hãy bắt đầu ngay!</p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {results.map((result) => (
-                      <div key={result.id} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-                        <div className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
-                          <div>
-                            <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
-                              {new Date(result.timestamp).toLocaleString('vi-VN')}
-                            </p>
-                            <h3 className="text-lg font-bold">Kết quả bài làm</h3>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <button 
-                              onClick={() => downloadWordReport(result)}
-                              className="p-3 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-2xl transition-colors flex items-center gap-2 text-xs font-bold"
-                            >
-                              <FileDown size={18} />
-                              Tải Word
-                            </button>
-                            <div className="text-right">
-                              <p className="text-2xl font-black text-blue-600">{result.score}/{QUESTIONS.filter(q => q.type === 'multiple-choice').length}</p>
-                              <p className="text-[10px] text-slate-400 uppercase font-bold">Điểm trắc nghiệm</p>
-                            </div>
-                          </div>
-                        </div>
+                  <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-100">
+                            <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Thời gian</th>
+                            <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Điểm TN</th>
+                            <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Hành động</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {results.map((result) => (
+                            <tr key={result.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                              <td className="p-4">
+                                <p className="font-bold text-slate-900">{new Date(result.timestamp).toLocaleString('vi-VN')}</p>
+                              </td>
+                              <td className="p-4">
+                                <p className="font-black text-blue-600">{result.score}/{QUESTIONS.filter(q => q.type === 'multiple-choice').length}</p>
+                              </td>
+                              <td className="p-4">
+                                <div className="flex items-center gap-2">
+                                  <button 
+                                    onClick={() => setSelectedResult(result)}
+                                    className="text-blue-600 hover:text-blue-800 text-sm font-bold flex items-center gap-1"
+                                  >
+                                    Chi tiết <ChevronRight size={14} />
+                                  </button>
+                                  <button 
+                                    onClick={() => downloadWordReport(result)}
+                                    className="p-2 bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-600 rounded-lg transition-colors"
+                                    title="Tải về file Word"
+                                  >
+                                    <FileDown size={16} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {view === 'admin' && (
+              <motion.div 
+                key="admin"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-8"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <button 
+                      onClick={() => setView('home')}
+                      className="p-2 hover:bg-white hover:shadow-md rounded-xl transition-all text-slate-600 border border-transparent hover:border-slate-100"
+                      title="Quay lại"
+                    >
+                      <ChevronLeft size={24} />
+                    </button>
+                    <div>
+                      <h2 className="text-2xl font-black text-slate-900 tracking-tight">Bảng Thành Tích</h2>
+                      <p className="text-slate-500 text-sm font-medium">Vinh danh những nỗ lực xuất sắc của học sinh</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="px-4 py-2 bg-white border border-slate-200 rounded-2xl shadow-sm flex items-center gap-2">
+                      <Trophy size={16} className="text-amber-500" />
+                      <span className="text-sm font-bold text-slate-700">Tổng số: {results.length}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Top 3 Spotlight */}
+                {results.length >= 3 && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {results
+                      .slice()
+                      .sort((a, b) => {
+                        if (b.score !== a.score) return b.score - a.score;
+                        return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+                      })
+                      .slice(0, 3)
+                      .map((res, idx) => {
+                        const colors = [
+                          { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', icon: 'text-amber-500', shadow: 'shadow-amber-100' },
+                          { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700', icon: 'text-slate-400', shadow: 'shadow-slate-100' },
+                          { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', icon: 'text-orange-500', shadow: 'shadow-orange-100' }
+                        ][idx];
                         
-                        <div className="p-6 space-y-6">
+                        return (
+                          <motion.div
+                            key={res.id}
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: idx * 0.1 }}
+                            className={`${colors.bg} ${colors.border} ${colors.shadow} border-2 rounded-[2rem] p-6 relative overflow-hidden shadow-xl flex flex-col items-center text-center group cursor-pointer hover:scale-[1.02] transition-transform`}
+                            onClick={() => setSelectedResult(res)}
+                          >
+                            <div className="absolute top-4 right-4">
+                              <Trophy className={colors.icon} size={24} />
+                            </div>
+                            <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg mb-4 border-4 border-white">
+                              <span className={`text-3xl font-black ${colors.text}`}>{idx + 1}</span>
+                            </div>
+                            <h4 className="text-lg font-black text-slate-900 mb-1 line-clamp-1">{res.studentName}</h4>
+                            <div className="flex items-center gap-2 mb-4">
+                              <span className="px-2 py-0.5 bg-white/50 rounded-lg text-[10px] font-black uppercase text-slate-600 border border-white/50">Lớp {res.studentClass}</span>
+                              <span className={`text-sm font-black ${colors.text}`}>{res.score} điểm</span>
+                            </div>
+                            <button className="text-xs font-bold text-slate-500 group-hover:text-slate-900 transition-colors flex items-center gap-1">
+                              Xem chi tiết <ChevronRight size={12} />
+                            </button>
+                          </motion.div>
+                        );
+                      })}
+                  </div>
+                )}
+
+                <div className="bg-white rounded-[2rem] shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
+                  <div className="p-6 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
+                    <h3 className="font-black text-slate-400 uppercase tracking-widest text-xs">Danh sách xếp hạng</h3>
+                    <div className="flex gap-2">
+                      {CLASSES.map(c => (
+                        <div key={c} className="w-2 h-2 rounded-full bg-slate-200"></div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-100 bg-slate-50/30">
+                          <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest w-20 text-center">Hạng</th>
+                          <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Học sinh</th>
+                          <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Lớp</th>
+                          <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Điểm TN</th>
+                          <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden md:table-cell">Thời gian</th>
+                          <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Hành động</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {results
+                          .slice()
+                          .sort((a, b) => {
+                            if (b.score !== a.score) return b.score - a.score;
+                            return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+                          })
+                          .map((res, idx) => (
+                          <tr 
+                            key={res.id} 
+                            className={`group border-b border-slate-50 hover:bg-blue-50/40 transition-all cursor-pointer ${idx < 3 ? 'bg-blue-50/10' : ''}`}
+                            onClick={() => setSelectedResult(res)}
+                          >
+                            <td className="p-6">
+                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-sm mx-auto transition-all group-hover:scale-110 shadow-sm ${
+                                idx === 0 ? 'bg-amber-400 text-white shadow-amber-200' :
+                                idx === 1 ? 'bg-slate-400 text-white shadow-slate-200' :
+                                idx === 2 ? 'bg-orange-400 text-white shadow-orange-200' :
+                                'bg-white border border-slate-200 text-slate-400'
+                              }`}>
+                                {idx + 1}
+                              </div>
+                            </td>
+                            <td className="p-6">
+                              <div className="flex flex-col">
+                                <p className="font-black text-slate-900 group-hover:text-blue-600 transition-colors text-base">{res.studentName}</p>
+                                {idx < 3 && (
+                                  <span className={`text-[9px] font-black uppercase tracking-widest mt-0.5 ${
+                                    idx === 0 ? 'text-amber-500' : idx === 1 ? 'text-slate-500' : 'text-orange-500'
+                                  }`}>
+                                    Top {idx + 1} Xuất sắc
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-6">
+                              <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black uppercase group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors border border-slate-200/50">
+                                {res.studentClass}
+                              </span>
+                            </td>
+                            <td className="p-6">
+                              <div className="flex flex-col gap-1.5">
+                                <div className="flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                  <span>Tiến độ</span>
+                                  <span className="text-blue-600">
+                                    {Math.round((res.score / QUESTIONS.filter(q => q.type === 'multiple-choice').length) * 100)}%
+                                  </span>
+                                </div>
+                                <div className="h-2 w-32 bg-slate-100 rounded-full overflow-hidden border border-slate-200/50">
+                                  <motion.div 
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${(res.score / QUESTIONS.filter(q => q.type === 'multiple-choice').length) * 100}%` }}
+                                    className={`h-full rounded-full ${
+                                      idx === 0 ? 'bg-amber-400' : idx === 1 ? 'bg-slate-400' : idx === 2 ? 'bg-orange-400' : 'bg-blue-600'
+                                    }`}
+                                  />
+                                </div>
+                                <span className="font-black text-slate-900 text-sm">
+                                  {res.score} / {QUESTIONS.filter(q => q.type === 'multiple-choice').length}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="p-6 text-[11px] text-slate-400 font-bold hidden md:table-cell">
+                              <div className="flex flex-col">
+                                <span>{new Date(res.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
+                                <span className="text-[10px] opacity-60">{new Date(res.timestamp).toLocaleDateString('vi-VN')}</span>
+                              </div>
+                            </td>
+                            <td className="p-6">
+                              <div className="flex items-center justify-end gap-2">
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    downloadWordReport(res);
+                                  }}
+                                  className="p-3 bg-white border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 rounded-2xl transition-all shadow-sm hover:shadow-md active:scale-95"
+                                  title="Tải về file Word"
+                                >
+                                  <FileDown size={18} />
+                                </button>
+                                {profile?.role === 'admin' && (
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteResult(res.id);
+                                    }}
+                                    className="p-3 bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-200 hover:bg-red-50 rounded-2xl transition-all shadow-sm hover:shadow-md active:scale-95"
+                                    title="Xóa kết quả"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Detail Modal Overlay - Shared by Admin and History */}
+            <AnimatePresence>
+              {selectedResult && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                  onClick={() => setSelectedResult(null)}
+                >
+                  <motion.div 
+                    initial={{ scale: 0.9, y: 20 }}
+                    animate={{ scale: 1, y: 0 }}
+                    exit={{ scale: 0.9, y: 20 }}
+                    className="bg-white rounded-3xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                      <div>
+                        <h3 className="text-2xl font-black text-slate-900 mb-1">{selectedResult.studentName}</h3>
+                        <div className="flex items-center gap-3">
+                          <span className="px-2 py-0.5 bg-blue-100 text-blue-600 rounded-lg text-[10px] font-black uppercase border border-blue-200">Lớp {selectedResult.studentClass}</span>
+                          <span className="text-[11px] text-slate-400 font-bold uppercase tracking-widest">{new Date(selectedResult.timestamp).toLocaleString('vi-VN')}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button 
+                          onClick={() => downloadWordReport(selectedResult)}
+                          className="p-3 bg-blue-600 text-white hover:bg-blue-700 rounded-2xl transition-all flex items-center gap-2 text-xs font-black shadow-lg shadow-blue-100 active:scale-95"
+                        >
+                          <FileDown size={18} />
+                          TẢI WORD
+                        </button>
+                        <button 
+                          onClick={() => setSelectedResult(null)}
+                          className="p-3 bg-white border border-slate-200 text-slate-400 hover:text-slate-900 hover:bg-slate-50 rounded-2xl transition-all active:scale-95"
+                        >
+                          <X size={20} />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto p-8 space-y-10">
+                      <div className="grid grid-cols-2 gap-6">
+                        <div className="p-6 bg-blue-50/50 rounded-[2rem] border-2 border-blue-100 text-center shadow-sm">
+                          <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-2">Điểm trắc nghiệm</p>
+                          <p className="text-4xl font-black text-blue-900">{selectedResult.score}/{QUESTIONS.filter(q => q.type === 'multiple-choice').length}</p>
+                        </div>
+                        <div className="p-6 bg-slate-50/50 rounded-[2rem] border-2 border-slate-100 text-center shadow-sm">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Xếp hạng</p>
+                          <p className="text-4xl font-black text-slate-900">
+                            #{results.slice().sort((a,b) => b.score - a.score).findIndex(r => r.id === selectedResult.id) + 1}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-8">
+                        <div className="flex items-center gap-3">
+                          <div className="h-px flex-1 bg-slate-100"></div>
+                          <h4 className="font-black text-slate-400 uppercase tracking-widest text-[10px]">Chi tiết câu trả lời</h4>
+                          <div className="h-px flex-1 bg-slate-100"></div>
+                        </div>
+                        <div className="space-y-6">
                           {QUESTIONS.map((q) => (
-                            <div key={q.id} className="border-b border-slate-100 last:border-0 pb-6 last:pb-0">
-                              <div className="flex items-start gap-3 mb-3">
-                                <span className="w-6 h-6 bg-slate-100 rounded-lg flex items-center justify-center text-xs font-bold text-slate-500 shrink-0 mt-1">{q.id}</span>
-                                <p className="font-bold text-slate-800">{q.question}</p>
+                            <div key={q.id} className="bg-slate-50/30 rounded-3xl p-6 border border-slate-100/50">
+                              <div className="flex items-start gap-4 mb-4">
+                                <span className="w-8 h-8 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-xs font-black text-slate-400 shrink-0 mt-0.5 shadow-sm">{q.id}</span>
+                                <p className="font-black text-slate-800 text-lg leading-snug">{q.question}</p>
                               </div>
                               
                               <div className="ml-9 space-y-3">
-                                <div className={`p-4 rounded-2xl flex items-center justify-between ${
+                                <div className={`p-4 rounded-2xl ${
                                   q.type === 'multiple-choice' 
-                                    ? result.answers[q.id] === q.correctAnswer 
+                                    ? selectedResult.answers[q.id] === q.correctAnswer 
                                       ? 'bg-green-50 text-green-800 border border-green-100' 
                                       : 'bg-red-50 text-red-800 border border-red-100'
                                     : 'bg-blue-50 text-blue-800 border border-blue-100'
                                 }`}>
-                                  <div>
-                                    <p className="text-[10px] uppercase font-black opacity-60 mb-1">Câu trả lời của em</p>
-                                    <p className="font-medium">{result.answers[q.id] || '(Bỏ trống)'}</p>
-                                  </div>
-                                  {q.type === 'multiple-choice' && (
-                                    result.answers[q.id] === q.correctAnswer ? <CheckCircle size={20} /> : <XCircle size={20} />
-                                  )}
+                                  <p className="text-[10px] uppercase font-black opacity-60 mb-1">Câu trả lời của học sinh</p>
+                                  <p className="font-medium">{selectedResult.answers[q.id] || '(Bỏ trống)'}</p>
                                 </div>
 
-                                {q.type === 'multiple-choice' && result.answers[q.id] !== q.correctAnswer && (
+                                {q.type === 'multiple-choice' && selectedResult.answers[q.id] !== q.correctAnswer && (
                                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                                     <p className="text-[10px] uppercase font-black text-slate-400 mb-1">Đáp án đúng</p>
                                     <p className="font-bold text-slate-700">{q.correctAnswer}</p>
                                   </div>
                                 )}
-
+                                
                                 <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
                                   <p className="text-[10px] uppercase font-black text-amber-600 mb-1">Giải thích</p>
                                   <div className="text-sm text-amber-900 leading-relaxed">
@@ -1101,191 +1408,11 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </motion.div>
-            )}
-
-            {view === 'admin' && (
-              <motion.div 
-                key="admin"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="space-y-6"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-2xl font-bold">Bảng thành tích học sinh</h2>
-                  <div className="flex gap-2">
-                    <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">Tổng số: {results.length}</span>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-100">
-                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest w-16">Hạng</th>
-                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Học sinh</th>
-                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Lớp</th>
-                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Điểm TN</th>
-                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Thời gian</th>
-                          <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Hành động</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {results
-                          .slice()
-                          .sort((a, b) => {
-                            if (b.score !== a.score) return b.score - a.score;
-                            return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-                          })
-                          .map((res, idx) => (
-                          <tr key={res.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                            <td className="p-4">
-                              <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs ${
-                                idx === 0 ? 'bg-amber-100 text-amber-700' :
-                                idx === 1 ? 'bg-slate-200 text-slate-700' :
-                                idx === 2 ? 'bg-orange-100 text-orange-700' :
-                                'bg-slate-50 text-slate-400'
-                              }`}>
-                                {idx + 1}
-                              </div>
-                            </td>
-                            <td className="p-4 font-bold text-slate-900">{res.studentName}</td>
-                            <td className="p-4"><span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-black uppercase">{res.studentClass}</span></td>
-                            <td className="p-4 font-black text-blue-600">{res.score}/{QUESTIONS.filter(q => q.type === 'multiple-choice').length}</td>
-                            <td className="p-4 text-xs text-slate-500">{new Date(res.timestamp).toLocaleString('vi-VN')}</td>
-                            <td className="p-4">
-                              <div className="flex items-center gap-2">
-                                <button 
-                                  onClick={() => setSelectedResult(res)}
-                                  className="text-blue-600 hover:text-blue-800 text-sm font-bold flex items-center gap-1"
-                                >
-                                  Chi tiết <ChevronRight size={14} />
-                                </button>
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    downloadWordReport(res);
-                                  }}
-                                  className="p-2 bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-600 rounded-lg transition-colors"
-                                  title="Tải về file Word"
-                                >
-                                  <FileDown size={16} />
-                                </button>
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteResult(res.id);
-                                  }}
-                                  className="p-2 bg-slate-100 text-slate-600 hover:bg-red-100 hover:text-red-600 rounded-lg transition-colors"
-                                  title="Xóa kết quả"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Detail Modal Overlay */}
-                <AnimatePresence>
-                  {selectedResult && (
-                    <motion.div 
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-                      onClick={() => setSelectedResult(null)}
-                    >
-                      <motion.div 
-                        initial={{ scale: 0.9, y: 20 }}
-                        animate={{ scale: 1, y: 0 }}
-                        exit={{ scale: 0.9, y: 20 }}
-                        className="bg-white rounded-3xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                          <div>
-                            <h3 className="text-xl font-bold text-slate-900">{selectedResult.studentName}</h3>
-                            <p className="text-xs text-slate-500 font-medium">Lớp {selectedResult.studentClass} • {new Date(selectedResult.timestamp).toLocaleString('vi-VN')}</p>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <button 
-                              onClick={() => downloadWordReport(selectedResult)}
-                              className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl transition-colors flex items-center gap-2 text-xs font-bold"
-                            >
-                              <FileDown size={16} />
-                              Tải Word
-                            </button>
-                            <button 
-                              onClick={() => setSelectedResult(null)}
-                              className="p-2 hover:bg-slate-200 rounded-full transition-all"
-                            >
-                              <X size={24} className="text-slate-500" />
-                            </button>
-                          </div>
-                        </div>
-                        
-                        <div className="flex-1 overflow-y-auto p-6 space-y-8">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 text-center">
-                              <p className="text-xs font-black text-blue-600 uppercase tracking-widest mb-1">Điểm trắc nghiệm</p>
-                              <p className="text-3xl font-black text-blue-900">{selectedResult.score}/{QUESTIONS.filter(q => q.type === 'multiple-choice').length}</p>
-                            </div>
-                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-center">
-                              <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Xếp hạng</p>
-                              <p className="text-3xl font-black text-slate-900">
-                                #{results.slice().sort((a,b) => b.score - a.score).findIndex(r => r.id === selectedResult.id) + 1}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="space-y-6">
-                            <h4 className="font-black text-slate-400 uppercase tracking-widest text-xs">Chi tiết câu trả lời</h4>
-                            {QUESTIONS.map((q) => (
-                              <div key={q.id} className="border-b border-slate-100 last:border-0 pb-6 last:pb-0">
-                                <div className="flex items-start gap-3 mb-3">
-                                  <span className="w-6 h-6 bg-slate-100 rounded-lg flex items-center justify-center text-xs font-bold text-slate-500 shrink-0 mt-1">{q.id}</span>
-                                  <p className="font-bold text-slate-800">{q.question}</p>
-                                </div>
-                                
-                                <div className="ml-9 space-y-3">
-                                  <div className={`p-4 rounded-2xl ${
-                                    q.type === 'multiple-choice' 
-                                      ? selectedResult.answers[q.id] === q.correctAnswer 
-                                        ? 'bg-green-50 text-green-800 border border-green-100' 
-                                        : 'bg-red-50 text-red-800 border border-red-100'
-                                      : 'bg-blue-50 text-blue-800 border border-blue-100'
-                                  }`}>
-                                    <p className="text-[10px] uppercase font-black opacity-60 mb-1">Câu trả lời của học sinh</p>
-                                    <p className="font-medium">{selectedResult.answers[q.id] || '(Bỏ trống)'}</p>
-                                  </div>
-
-                                  {q.type === 'multiple-choice' && selectedResult.answers[q.id] !== q.correctAnswer && (
-                                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                      <p className="text-[10px] uppercase font-black text-slate-400 mb-1">Đáp án đúng</p>
-                                      <p className="font-bold text-slate-700">{q.correctAnswer}</p>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </motion.div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </motion.div>
-            )}
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </AnimatePresence>
         </main>
       </div>
