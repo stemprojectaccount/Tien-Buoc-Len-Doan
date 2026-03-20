@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Use environment variables if available (for Vercel/GitHub), otherwise fallback to JSON
@@ -19,3 +20,4 @@ const databaseId = metaEnv.VITE_FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfig
 const app = initializeApp(config);
 export const auth = getAuth(app);
 export const db = getFirestore(app, databaseId);
+export const storage = getStorage(app);

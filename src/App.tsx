@@ -20,7 +20,9 @@ import {
   User as FirebaseUser,
   signOut
 } from 'firebase/auth';
-import { db, auth } from './firebase';
+import { db, auth, storage } from './firebase';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import html2canvas from 'html2canvas';
 import { 
   LogOut, 
   User as UserIcon, 
@@ -34,6 +36,8 @@ import {
   AlertCircle,
   Trophy,
   X,
+  Eye,
+  Camera,
   FileDown,
   ChevronLeft,
   Trash2,
@@ -53,6 +57,15 @@ interface UserProfile {
   role: 'student' | 'admin';
 }
 
+const shuffleArray = <T,>(array: T[]): T[] => {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+};
+
 interface QuizQuestion {
   id: number;
   type: 'multiple-choice' | 'essay';
@@ -71,6 +84,8 @@ interface QuizResult {
   answers: { [key: number]: string };
   score: number;
   timestamp: string;
+  note?: string;
+  screenshotUrl?: string;
 }
 
 // --- Constants ---
@@ -343,6 +358,7 @@ const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
 };
 
 export default function App() {
+  const quizContainerRef = React.useRef<HTMLDivElement>(null);
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -358,6 +374,10 @@ export default function App() {
     const saved = localStorage.getItem('quiz_progress');
     return saved ? JSON.parse(saved) : {};
   });
+  const [shuffledOptions, setShuffledOptions] = useState<{ [key: number]: string[] }>(() => {
+    const saved = localStorage.getItem('shuffled_options');
+    return saved ? JSON.parse(saved) : {};
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -370,6 +390,12 @@ export default function App() {
       localStorage.setItem('quiz_progress', JSON.stringify(answers));
     }
   }, [answers]);
+
+  useEffect(() => {
+    if (Object.keys(shuffledOptions).length > 0) {
+      localStorage.setItem('shuffled_options', JSON.stringify(shuffledOptions));
+    }
+  }, [shuffledOptions]);
 
   // Admin/History state
   const [results, setResults] = useState<QuizResult[]>([]);
@@ -415,6 +441,14 @@ export default function App() {
                 new TextRun({ text: `${result.score}/${QUESTIONS.filter(q => q.type === 'multiple-choice').length}` }),
               ],
             }),
+            ...(result.note ? [
+              new Paragraph({
+                children: [
+                  new TextRun({ text: `Ghi chú: `, bold: true, color: "FF0000" }),
+                  new TextRun({ text: result.note, color: "FF0000", italics: true }),
+                ],
+              }),
+            ] : []),
             new Paragraph({
               children: [
                 new TextRun({ text: `Thời gian nộp bài: `, bold: true }),
@@ -574,6 +608,17 @@ export default function App() {
         // Use existing profile
         const existingDoc = querySnapshot.docs[0];
         userProfile = existingDoc.data() as UserProfile;
+        
+        // Check if this user already has a result
+        const resultsSnapshot = await getDocs(query(collection(db, 'results'), where('uid', '==', userProfile.uid)));
+        if (!resultsSnapshot.empty) {
+          setProfile(userProfile);
+          localStorage.setItem('student_profile', JSON.stringify(userProfile));
+          setNotification({ message: 'Em đã hoàn thành bài thi trước đó rồi!', type: 'info' });
+          setView('history');
+          return;
+        }
+        
         setNotification({ message: `Chào mừng em quay lại, ${userProfile.name}!`, type: 'success' });
       } else {
         // Create new profile
@@ -597,6 +642,11 @@ export default function App() {
   };
 
   const handleStartQuiz = () => {
+    if (results.some(r => r.uid === profile?.uid)) {
+      setNotification({ message: 'Em đã hoàn thành bài thi rồi!', type: 'info' });
+      setView('history');
+      return;
+    }
     // Request fullscreen
     const element = document.documentElement as any;
     const requestMethod = element.requestFullscreen || 
@@ -612,9 +662,119 @@ export default function App() {
 
     // We don't clear answers here anymore to support progress persistence
     // If user wants to start fresh, they can do so after submitting or logging out
+    
+    // Initialize shuffled options if not already done
+    if (Object.keys(shuffledOptions).length === 0) {
+      const newShuffled: { [key: number]: string[] } = {};
+      QUESTIONS.forEach(q => {
+        if (q.type === 'multiple-choice' && q.options) {
+          newShuffled[q.id] = shuffleArray(q.options);
+        }
+      });
+      setShuffledOptions(newShuffled);
+    }
+
     setCurrentStep(0);
     setView('quiz');
   };
+
+  const handleSubmitQuiz = useCallback(async (forcedScore?: number, note?: string) => {
+    if (!profile || isSubmitting) return;
+    setIsSubmitting(true);
+    
+    // Calculate score for multiple choice
+    let score = 0;
+    if (forcedScore !== undefined) {
+      score = forcedScore;
+    } else {
+      QUESTIONS.forEach(q => {
+        if (q.type === 'multiple-choice' && answers[q.id] === q.correctAnswer) {
+          score++;
+        }
+      });
+    }
+
+    const result: Omit<QuizResult, 'id'> = {
+      uid: profile.uid,
+      studentName: profile.name,
+      studentClass: profile.class,
+      answers,
+      score,
+      timestamp: new Date().toISOString(),
+      note: note || "" // Firestore doesn't allow undefined
+    };
+
+    try {
+      // Capture screenshot if not cheating (if cheating, we might not have the container or it might be hidden)
+      let screenshotUrl = '';
+      if (!note && quizContainerRef.current) {
+        try {
+          const canvas = await html2canvas(quizContainerRef.current, {
+            useCORS: true,
+            scale: 1,
+            logging: false,
+            backgroundColor: '#f8fafc',
+            onclone: (clonedDoc) => {
+              // Workaround for oklch colors which html2canvas doesn't support
+              // We'll replace them with safe fallbacks in the cloned document
+              const styleTags = clonedDoc.getElementsByTagName('style');
+              for (let i = 0; i < styleTags.length; i++) {
+                const tag = styleTags[i];
+                if (tag.innerHTML.includes('oklch')) {
+                  // Replace oklch(...) with a simple gray color to prevent parser error
+                  tag.innerHTML = tag.innerHTML.replace(/oklch\([^)]+\)/g, '#cbd5e1');
+                }
+              }
+              const style = clonedDoc.createElement('style');
+              style.innerHTML = `
+                .bg-slate-50 { background-color: #f8fafc !important; }
+                .bg-white { background-color: #ffffff !important; }
+                .text-slate-900 { color: #0f172a !important; }
+                .text-slate-500 { color: #64748b !important; }
+                .text-blue-600 { color: #2563eb !important; }
+                .border-slate-100 { border-color: #f1f5f9 !important; }
+              `;
+              clonedDoc.head.appendChild(style);
+            }
+          });
+          const imageData = canvas.toDataURL('image/jpeg', 0.6);
+          const screenshotRef = ref(storage, `screenshots/${profile.uid}_${Date.now()}.jpg`);
+          await uploadString(screenshotRef, imageData, 'data_url');
+          screenshotUrl = await getDownloadURL(screenshotRef);
+        } catch (err) {
+          console.error('Screenshot capture failed:', err);
+        }
+      }
+
+      const finalResult = { ...result, screenshotUrl };
+      const resultRef = doc(collection(db, 'results'));
+      await setDoc(resultRef, finalResult);
+      localStorage.removeItem('quiz_progress');
+      localStorage.removeItem('shuffled_options');
+      setAnswers({});
+      setShuffledOptions({});
+      
+      // Exit fullscreen if we were in it
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+
+      if (note) {
+        setNotification({ 
+          message: 'Cảnh báo: Phát hiện hành vi gian lận! Bài thi đã bị hủy và tính 0 điểm.', 
+          type: 'info' 
+        });
+        setView('home');
+      } else {
+        setSelectedResult({ id: resultRef.id, ...finalResult });
+        setView('history');
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'results');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [profile, isSubmitting, answers, db, setView, setSelectedResult, setNotification]);
 
   // Prevent accidental exit during quiz
   useEffect(() => {
@@ -630,6 +790,12 @@ export default function App() {
       }
     };
 
+    // Kick out if they already have a result but are in quiz view
+    if (view === 'quiz' && profile && results.some(r => r.uid === profile.uid)) {
+      setView('home');
+      setNotification({ message: 'Em đã hoàn thành bài thi rồi!', type: 'info' });
+    }
+
     const handleFullscreenChange = () => {
       const isFull = !!(doc.fullscreenElement || 
                         doc.webkitFullscreenElement || 
@@ -642,14 +808,20 @@ export default function App() {
       const isInputFocused = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
 
       if (view === 'quiz' && !isFull && !isInputFocused) {
-        setNotification({ 
-          message: 'Cảnh báo: Bạn đã thoát chế độ toàn màn hình! Vui lòng quay lại để tiếp tục làm bài.', 
-          type: 'info' 
-        });
+        // Auto-submit with 0 score if cheating detected
+        handleSubmitQuiz(0, 'gian lận xài ai trong lúc làm');
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (view === 'quiz' && document.visibilityState === 'hidden') {
+        // Auto-submit with 0 score if user switches tabs
+        handleSubmitQuiz(0, 'gian lận xài ai trong lúc làm');
       }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.addEventListener('mozfullscreenchange', handleFullscreenChange);
@@ -657,47 +829,13 @@ export default function App() {
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
       document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
       document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
     };
-  }, [view]);
-
-  const handleSubmitQuiz = async () => {
-    if (!profile) return;
-    setIsSubmitting(true);
-    
-    // Calculate score for multiple choice
-    let score = 0;
-    QUESTIONS.forEach(q => {
-      if (q.type === 'multiple-choice' && answers[q.id] === q.correctAnswer) {
-        score++;
-      }
-    });
-
-    const result: Omit<QuizResult, 'id'> = {
-      uid: profile.uid,
-      studentName: profile.name,
-      studentClass: profile.class,
-      answers,
-      score,
-      timestamp: new Date().toISOString()
-    };
-
-    try {
-      const resultRef = doc(collection(db, 'results'));
-      await setDoc(resultRef, result);
-      localStorage.removeItem('quiz_progress');
-      setAnswers({});
-      setSelectedResult({ id: resultRef.id, ...result });
-      setView('history');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'results');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  }, [view, handleSubmitQuiz]);
 
   const handleLogout = () => {
     localStorage.removeItem('student_profile');
@@ -952,20 +1090,34 @@ export default function App() {
                   <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between">
                     <div>
                       <h3 className="text-2xl font-bold mb-4">
-                        {Object.keys(answers).length > 0 ? 'Tiếp tục bài làm' : 'Bắt đầu kiểm tra'}
+                        {results.some(r => r.uid === profile?.uid) 
+                          ? 'Bài thi đã hoàn thành' 
+                          : (Object.keys(answers).length > 0 ? 'Tiếp tục bài làm' : 'Bắt đầu kiểm tra')}
                       </h3>
                       <p className="text-slate-500 mb-6">
-                        {Object.keys(answers).length > 0 
-                          ? `Em đang làm dở bài thi (${Object.keys(answers).length}/${QUESTIONS.length} câu).` 
-                          : 'Thử thách bản thân với các câu hỏi trắc nghiệm và tự luận về Đoàn.'}
+                        {results.some(r => r.uid === profile?.uid)
+                          ? 'Em đã nộp bài thi rồi. Em có thể xem lại kết quả trong phần Lịch sử.'
+                          : (Object.keys(answers).length > 0 
+                            ? `Em đang làm dở bài thi (${Object.keys(answers).length}/${QUESTIONS.length} câu).` 
+                            : 'Thử thách bản thân với các câu hỏi trắc nghiệm và tự luận về Đoàn.')}
                       </p>
                     </div>
-                    <button 
-                      onClick={handleStartQuiz}
-                      className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
-                    >
-                      {Object.keys(answers).length > 0 ? 'Tiếp tục ngay' : 'Bắt đầu ngay'} <ChevronRight size={20} />
-                    </button>
+                    {results.some(r => r.uid === profile?.uid) ? (
+                      <button 
+                        onClick={() => setView('history')}
+                        className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                      >
+                        <History size={20} />
+                        Xem lịch sử bài làm
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={handleStartQuiz}
+                        className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
+                      >
+                        {Object.keys(answers).length > 0 ? 'Tiếp tục ngay' : 'Bắt đầu ngay'} <ChevronRight size={20} />
+                      </button>
+                    )}
                   </div>
                   
                   <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between">
@@ -987,6 +1139,7 @@ export default function App() {
             {view === 'quiz' && (
               <motion.div 
                 key="quiz"
+                ref={quizContainerRef}
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
@@ -1061,7 +1214,7 @@ export default function App() {
 
                     {QUESTIONS[currentStep].type === 'multiple-choice' ? (
                       <div className="space-y-3">
-                        {QUESTIONS[currentStep].options?.map((option, idx) => (
+                        {(shuffledOptions[QUESTIONS[currentStep].id] || QUESTIONS[currentStep].options || []).map((option, idx) => (
                           <button
                             key={idx}
                             onClick={() => setAnswers({ ...answers, [QUESTIONS[currentStep].id]: option })}
@@ -1147,7 +1300,7 @@ export default function App() {
                           </button>
                         ) : (
                           <button 
-                            onClick={handleSubmitQuiz}
+                            onClick={() => handleSubmitQuiz()}
                             disabled={isSubmitting || !answers[QUESTIONS[currentStep].id]}
                             className="flex-[2] py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-emerald-200"
                           >
@@ -1313,7 +1466,12 @@ export default function App() {
                             <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg mb-4 border-4 border-white">
                               <span className={`text-3xl font-black ${colors.text}`}>{idx + 1}</span>
                             </div>
-                            <h4 className="text-lg font-black text-slate-900 mb-1 line-clamp-1">{res.studentName}</h4>
+                            <h4 className="text-lg font-black text-slate-900 mb-1 line-clamp-1">
+                              {res.studentName}
+                              {res.note && (
+                                <span className="ml-1 text-[8px] text-red-500 font-bold italic">({res.note})</span>
+                              )}
+                            </h4>
                             <div className="flex items-center gap-2 mb-4">
                               <span className="px-2 py-0.5 bg-white/50 rounded-lg text-[10px] font-black uppercase text-slate-600 border border-white/50">Lớp {res.studentClass}</span>
                               <span className={`text-sm font-black ${colors.text}`}>{res.score} điểm</span>
@@ -1373,7 +1531,12 @@ export default function App() {
                             </td>
                             <td className="p-6">
                               <div className="flex flex-col">
-                                <p className="font-black text-slate-900 group-hover:text-blue-600 transition-colors text-base">{res.studentName}</p>
+                                <p className="font-black text-slate-900 group-hover:text-blue-600 transition-colors text-base">
+                                  {res.studentName}
+                                  {res.note && (
+                                    <span className="ml-2 text-[10px] text-red-500 font-bold italic">({res.note})</span>
+                                  )}
+                                </p>
                                 {idx < 3 && (
                                   <span className={`text-[9px] font-black uppercase tracking-widest mt-0.5 ${
                                     idx === 0 ? 'text-amber-500' : idx === 1 ? 'text-slate-500' : 'text-orange-500'
@@ -1418,6 +1581,18 @@ export default function App() {
                             </td>
                             <td className="p-6">
                               <div className="flex items-center justify-end gap-2">
+                                {res.screenshotUrl && (
+                                  <a 
+                                    href={res.screenshotUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="p-3 bg-white border border-slate-200 text-slate-400 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 rounded-2xl transition-all shadow-sm hover:shadow-md active:scale-95"
+                                    title="Xem minh chứng (Ảnh chụp màn hình)"
+                                  >
+                                    <Camera size={18} />
+                                  </a>
+                                )}
                                 <button 
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -1470,7 +1645,12 @@ export default function App() {
                   >
                     <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                       <div>
-                        <h3 className="text-2xl font-black text-slate-900 mb-1">{selectedResult.studentName}</h3>
+                        <h3 className="text-2xl font-black text-slate-900 mb-1">
+                          {selectedResult.studentName}
+                          {selectedResult.note && (
+                            <span className="ml-2 text-xs text-red-500 font-bold italic">({selectedResult.note})</span>
+                          )}
+                        </h3>
                         <div className="flex items-center gap-3">
                           <span className="px-2 py-0.5 bg-blue-100 text-blue-600 rounded-lg text-[10px] font-black uppercase border border-blue-200">Lớp {selectedResult.studentClass}</span>
                           <span className="text-[11px] text-slate-400 font-bold uppercase tracking-widest">{new Date(selectedResult.timestamp).toLocaleString('vi-VN')}</span>
@@ -1506,6 +1686,33 @@ export default function App() {
                           </p>
                         </div>
                       </div>
+
+                      {selectedResult.screenshotUrl && (
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-3">
+                            <div className="h-px flex-1 bg-slate-100"></div>
+                            <h4 className="font-black text-slate-400 uppercase tracking-widest text-[10px]">Ảnh chụp màn hình (Minh chứng)</h4>
+                            <div className="h-px flex-1 bg-slate-100"></div>
+                          </div>
+                          <div className="rounded-3xl overflow-hidden border-4 border-slate-100 shadow-xl bg-slate-50 group relative">
+                            <img 
+                              src={selectedResult.screenshotUrl} 
+                              alt="Screenshot minh chứng" 
+                              className="w-full h-auto block transition-transform duration-500 group-hover:scale-105"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none"></div>
+                            <a 
+                              href={selectedResult.screenshotUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="absolute bottom-4 right-4 p-3 bg-white/90 backdrop-blur-md rounded-2xl shadow-xl text-slate-900 font-black text-[10px] uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-all transform translate-y-2 group-hover:translate-y-0"
+                            >
+                              Xem ảnh gốc
+                            </a>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="space-y-8">
                         <div className="flex items-center gap-3">
