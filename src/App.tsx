@@ -295,8 +295,29 @@ const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
         setError(e.message);
       }
     };
+    const handleRejection = (e: PromiseRejectionEvent) => {
+      const reason = e.reason;
+      if (reason && typeof reason === 'object' && reason.message) {
+        try {
+          const parsed = JSON.parse(reason.message);
+          if (parsed.error) {
+            setError(parsed.error);
+            return;
+          }
+        } catch {
+          // Not JSON
+        }
+        setError(reason.message);
+      } else {
+        setError(String(reason));
+      }
+    };
     window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleRejection);
+    };
   }, []);
 
   if (error) {
@@ -340,6 +361,7 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreenSupported, setIsFullscreenSupported] = useState(true);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
 
   // Save progress to localStorage
@@ -533,14 +555,15 @@ export default function App() {
   };
 
   const handleRegister = async () => {
-    if (!regName) return;
+    const trimmedName = regName.trim();
+    if (!trimmedName) return;
     setIsRegistering(true);
     
     try {
       // Check if user already exists with this name and class
       const q = query(
         collection(db, 'users'), 
-        where('name', '==', regName), 
+        where('name', '==', trimmedName), 
         where('class', '==', regClass)
       );
       const querySnapshot = await getDocs(q);
@@ -557,7 +580,7 @@ export default function App() {
         const uid = 'anon_' + Math.random().toString(36).substr(2, 9);
         userProfile = {
           uid,
-          name: regName,
+          name: trimmedName,
           class: regClass,
           role: 'student'
         };
@@ -575,9 +598,14 @@ export default function App() {
 
   const handleStartQuiz = () => {
     // Request fullscreen
-    const element = document.documentElement;
-    if (element.requestFullscreen) {
-      element.requestFullscreen().catch(err => {
+    const element = document.documentElement as any;
+    const requestMethod = element.requestFullscreen || 
+                          element.webkitRequestFullscreen || 
+                          element.mozRequestFullScreen || 
+                          element.msRequestFullscreen;
+
+    if (requestMethod) {
+      requestMethod.call(element).catch((err: any) => {
         console.warn(`Error attempting to enable full-screen mode: ${err.message}`);
       });
     }
@@ -590,6 +618,10 @@ export default function App() {
 
   // Prevent accidental exit during quiz
   useEffect(() => {
+    const doc = document as any;
+    const supported = !!(doc.fullscreenEnabled || doc.webkitFullscreenEnabled || doc.mozFullScreenEnabled || doc.msFullscreenEnabled);
+    setIsFullscreenSupported(supported);
+
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (view === 'quiz') {
         e.preventDefault();
@@ -599,10 +631,17 @@ export default function App() {
     };
 
     const handleFullscreenChange = () => {
-      const isFull = !!document.fullscreenElement;
+      const isFull = !!(doc.fullscreenElement || 
+                        doc.webkitFullscreenElement || 
+                        doc.mozFullScreenElement || 
+                        doc.msFullscreenElement);
       setIsFullscreen(isFull);
       
-      if (view === 'quiz' && !isFull) {
+      // Check if an input is focused - keyboard popup on mobile can trigger exit
+      const activeEl = document.activeElement;
+      const isInputFocused = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+
+      if (view === 'quiz' && !isFull && !isInputFocused) {
         setNotification({ 
           message: 'Cảnh báo: Bạn đã thoát chế độ toàn màn hình! Vui lòng quay lại để tiếp tục làm bài.', 
           type: 'info' 
@@ -612,10 +651,16 @@ export default function App() {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
     };
   }, [view]);
 
@@ -761,7 +806,7 @@ export default function App() {
     <ErrorBoundary>
       <div className="min-h-screen bg-slate-50 font-sans text-slate-900 overflow-x-hidden">
         {/* Fullscreen Overlay for Quiz */}
-        {view === 'quiz' && !isFullscreen && (
+        {view === 'quiz' && isFullscreenSupported && !isFullscreen && (
           <div className="fixed inset-0 z-[100] bg-slate-900/95 backdrop-blur-md flex items-center justify-center p-6 text-center">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
@@ -777,9 +822,13 @@ export default function App() {
               </p>
               <button
                 onClick={() => {
-                  const element = document.documentElement;
-                  if (element.requestFullscreen) {
-                    element.requestFullscreen().catch(err => {
+                  const element = document.documentElement as any;
+                  const requestMethod = element.requestFullscreen || 
+                                        element.webkitRequestFullscreen || 
+                                        element.mozRequestFullScreen || 
+                                        element.msRequestFullscreen;
+                  if (requestMethod) {
+                    requestMethod.call(element).catch((err: any) => {
                       console.error(`Error re-enabling fullscreen: ${err.message}`);
                     });
                   }
@@ -788,6 +837,14 @@ export default function App() {
               >
                 <Maximize size={20} />
                 Quay lại toàn màn hình
+              </button>
+              
+              {/* Emergency skip for buggy mobile browsers */}
+              <button 
+                onClick={() => setIsFullscreen(true)}
+                className="mt-6 text-slate-400 hover:text-slate-600 text-xs underline underline-offset-4"
+              >
+                Tiếp tục mà không cần toàn màn hình (nếu bị lỗi)
               </button>
             </motion.div>
           </div>
