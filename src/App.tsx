@@ -36,7 +36,9 @@ import {
   X,
   FileDown,
   ChevronLeft,
-  Trash2
+  Trash2,
+  ShieldAlert,
+  Maximize
 } from 'lucide-react';
 import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } from 'docx';
 import { saveAs } from 'file-saver';
@@ -336,6 +338,8 @@ export default function App() {
     return saved ? JSON.parse(saved) : {};
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
 
   // Save progress to localStorage
@@ -530,6 +534,7 @@ export default function App() {
 
   const handleRegister = async () => {
     if (!regName) return;
+    setIsRegistering(true);
     
     try {
       // Check if user already exists with this name and class
@@ -563,15 +568,56 @@ export default function App() {
       localStorage.setItem('student_profile', JSON.stringify(userProfile));
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/lookup`);
+    } finally {
+      setIsRegistering(false);
     }
   };
 
   const handleStartQuiz = () => {
+    // Request fullscreen
+    const element = document.documentElement;
+    if (element.requestFullscreen) {
+      element.requestFullscreen().catch(err => {
+        console.warn(`Error attempting to enable full-screen mode: ${err.message}`);
+      });
+    }
+
     // We don't clear answers here anymore to support progress persistence
     // If user wants to start fresh, they can do so after submitting or logging out
     setCurrentStep(0);
     setView('quiz');
   };
+
+  // Prevent accidental exit during quiz
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (view === 'quiz') {
+        e.preventDefault();
+        e.returnValue = 'Bạn đang trong quá trình làm bài. Bạn có chắc chắn muốn thoát?';
+        return e.returnValue;
+      }
+    };
+
+    const handleFullscreenChange = () => {
+      const isFull = !!document.fullscreenElement;
+      setIsFullscreen(isFull);
+      
+      if (view === 'quiz' && !isFull) {
+        setNotification({ 
+          message: 'Cảnh báo: Bạn đã thoát chế độ toàn màn hình! Vui lòng quay lại để tiếp tục làm bài.', 
+          type: 'info' 
+        });
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, [view]);
 
   const handleSubmitQuiz = async () => {
     if (!profile) return;
@@ -628,7 +674,7 @@ export default function App() {
 
   if (!profile && view !== 'admin') {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 overflow-x-hidden">
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -662,6 +708,7 @@ export default function App() {
                   value={regName}
                   onChange={(e) => setRegName(e.target.value)}
                   placeholder="Nhập họ và tên của em"
+                  autoComplete="name"
                   className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"
                 />
               </div>
@@ -672,7 +719,7 @@ export default function App() {
                     <button
                       key={c}
                       onClick={() => setRegClass(c)}
-                      className={`py-3 rounded-xl font-bold transition-all ${
+                      className={`py-3 rounded-xl font-bold transition-all active:scale-95 ${
                         regClass === c 
                           ? 'bg-blue-600 text-white shadow-md' 
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -685,10 +732,14 @@ export default function App() {
               </div>
               <button 
                 onClick={handleRegister}
-                disabled={!regName}
-                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed mt-4 active:scale-95"
+                disabled={!regName || isRegistering}
+                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed mt-4 active:scale-95 flex items-center justify-center gap-2"
               >
-                Vào làm bài
+                {isRegistering ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  'Vào làm bài'
+                )}
               </button>
 
               <div className="pt-6 border-t border-slate-100">
@@ -708,68 +759,103 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-        {/* Navigation */}
-        <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
-          <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
-            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('home')}>
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                <BookOpen className="text-white" size={18} />
+      <div className="min-h-screen bg-slate-50 font-sans text-slate-900 overflow-x-hidden">
+        {/* Fullscreen Overlay for Quiz */}
+        {view === 'quiz' && !isFullscreen && (
+          <div className="fixed inset-0 z-[100] bg-slate-900/95 backdrop-blur-md flex items-center justify-center p-6 text-center">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="max-w-md w-full bg-white rounded-3xl p-8 shadow-2xl border border-slate-100"
+            >
+              <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center text-red-600 mx-auto mb-6">
+                <ShieldAlert size={40} />
               </div>
-              <span className="font-bold text-lg hidden sm:block">Tiến Bước Lên Đoàn</span>
-            </div>
-            
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1 bg-white border border-blue-200 rounded-full px-3 py-1.5 shadow-sm">
-                <button 
-                  onClick={() => setView('history')}
-                  className={`p-1.5 rounded-lg transition-all ${view === 'history' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-blue-600 hover:bg-slate-50'}`}
-                  title="Lịch sử"
-                >
-                  <History size={20} />
-                </button>
-                {(profile?.role === 'admin' || view === 'admin') && (
-                  <>
-                    <div className="w-[1px] h-4 bg-slate-200 mx-0.5"></div>
-                    <button 
-                      onClick={() => setView('admin')}
-                      className={`p-1.5 rounded-lg transition-all ${view === 'admin' ? 'bg-purple-50 text-purple-600' : 'text-slate-400 hover:text-purple-600 hover:bg-slate-50'}`}
-                      title="Quản trị"
-                    >
-                      <ShieldCheck size={20} />
-                    </button>
-                  </>
-                )}
-              </div>
-              <div className="h-8 w-[1px] bg-slate-200 mx-1"></div>
-              <div className="flex items-center gap-2">
-                {profile ? (
-                  <>
-                    <div className="text-right hidden xs:block">
-                      <p className="text-xs font-bold leading-tight">{profile.name}</p>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-wider">{profile.class}</p>
-                    </div>
-                    <button 
-                      onClick={handleLogout}
-                      className="flex items-center gap-2 px-4 py-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all border border-slate-100 hover:border-red-100 font-medium"
-                    >
-                      <LogOut size={20} />
-                      <span className="hidden sm:inline">Đăng xuất</span>
-                    </button>
-                  </>
-                ) : (
-                  <button 
-                    onClick={() => setView('home')}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-bold shadow-sm"
-                  >
-                    <UserIcon size={18} />
-                    <span>Đăng ký</span>
-                  </button>
-                )}
-              </div>
-            </div>
+              <h2 className="text-2xl font-bold text-slate-900 mb-4">Chế độ toàn màn hình bị tắt</h2>
+              <p className="text-slate-600 mb-8 leading-relaxed">
+                Để đảm bảo tính công bằng và bảo mật cho bài thi, em vui lòng quay lại chế độ toàn màn hình để tiếp tục làm bài.
+              </p>
+              <button
+                onClick={() => {
+                  const element = document.documentElement;
+                  if (element.requestFullscreen) {
+                    element.requestFullscreen().catch(err => {
+                      console.error(`Error re-enabling fullscreen: ${err.message}`);
+                    });
+                  }
+                }}
+                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95 flex items-center justify-center gap-2"
+              >
+                <Maximize size={20} />
+                Quay lại toàn màn hình
+              </button>
+            </motion.div>
           </div>
-        </nav>
+        )}
+
+        {/* Navigation - Hidden during quiz */}
+        {view !== 'quiz' && (
+          <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
+            <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('home')}>
+                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                  <BookOpen className="text-white" size={18} />
+                </div>
+                <span className="font-bold text-lg hidden sm:block">Tiến Bước Lên Đoàn</span>
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1 bg-white border border-blue-200 rounded-full px-3 py-1.5 shadow-sm">
+                  <button 
+                    onClick={() => setView('history')}
+                    className={`p-1.5 rounded-lg transition-all ${view === 'history' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-blue-600 hover:bg-slate-50'}`}
+                    title="Lịch sử"
+                  >
+                    <History size={20} />
+                  </button>
+                  {(profile?.role === 'admin' || view === 'admin') && (
+                    <>
+                      <div className="w-[1px] h-4 bg-slate-200 mx-0.5"></div>
+                      <button 
+                        onClick={() => setView('admin')}
+                        className={`p-1.5 rounded-lg transition-all ${view === 'admin' ? 'bg-purple-50 text-purple-600' : 'text-slate-400 hover:text-purple-600 hover:bg-slate-50'}`}
+                        title="Quản trị"
+                      >
+                        <ShieldCheck size={20} />
+                      </button>
+                    </>
+                  )}
+                </div>
+                <div className="h-8 w-[1px] bg-slate-200 mx-1"></div>
+                <div className="flex items-center gap-2">
+                  {profile ? (
+                    <>
+                      <div className="text-right hidden xs:block">
+                        <p className="text-xs font-bold leading-tight">{profile.name}</p>
+                        <p className="text-[10px] text-slate-500 uppercase tracking-wider">{profile.class}</p>
+                      </div>
+                      <button 
+                        onClick={handleLogout}
+                        className="flex items-center gap-2 px-4 py-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all border border-slate-100 hover:border-red-100 font-medium"
+                      >
+                        <LogOut size={20} />
+                        <span className="hidden sm:inline">Đăng xuất</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button 
+                      onClick={() => setView('home')}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-bold shadow-sm active:scale-95"
+                    >
+                      <UserIcon size={18} />
+                      <span>Quay lại</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </nav>
+        )}
 
         {/* Notification Toast */}
         <AnimatePresence>
