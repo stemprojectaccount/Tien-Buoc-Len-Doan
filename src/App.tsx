@@ -434,6 +434,12 @@ export default function App() {
             }),
             new Paragraph({
               children: [
+                new TextRun({ text: `Ngày sinh: `, bold: true }),
+                new TextRun({ text: result.studentBirthDate }),
+              ],
+            }),
+            new Paragraph({
+              children: [
                 new TextRun({ text: `Lớp: `, bold: true }),
                 new TextRun({ text: result.studentClass }),
               ],
