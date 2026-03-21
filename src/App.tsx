@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   collection, 
   doc, 
@@ -42,7 +42,9 @@ import {
   ChevronLeft,
   Trash2,
   ShieldAlert,
-  Maximize
+  Maximize,
+  Filter,
+  Search
 } from 'lucide-react';
 import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } from 'docx';
 import { saveAs } from 'file-saver';
@@ -403,6 +405,21 @@ export default function App() {
   // Admin/History state
   const [results, setResults] = useState<QuizResult[]>([]);
   const [selectedResult, setSelectedResult] = useState<QuizResult | null>(null);
+  const [adminFilterClass, setAdminFilterClass] = useState<string>('all');
+  const [adminSearchName, setAdminSearchName] = useState<string>('');
+
+  const filteredResults = useMemo(() => {
+    return results
+      .filter(res => {
+        const matchClass = adminFilterClass === 'all' || res.studentClass === adminFilterClass;
+        const matchName = res.studentName.toLowerCase().includes(adminSearchName.toLowerCase());
+        return matchClass && matchName;
+      })
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+      });
+  }, [results, adminFilterClass, adminSearchName]);
 
   const handleDeleteResult = async (id: string) => {
     if (!window.confirm('Bạn có chắc chắn muốn xóa kết quả này không?')) return;
@@ -1461,63 +1478,80 @@ export default function App() {
                 </div>
 
                 {/* Top 3 Spotlight */}
-                {results.length >= 3 && (
+                {filteredResults.length > 0 && (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {results
-                      .slice()
-                      .sort((a, b) => {
-                        if (b.score !== a.score) return b.score - a.score;
-                        return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-                      })
-                      .slice(0, 3)
-                      .map((res, idx) => {
-                        const colors = [
-                          { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', icon: 'text-amber-500', shadow: 'shadow-amber-100' },
-                          { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700', icon: 'text-slate-400', shadow: 'shadow-slate-100' },
-                          { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', icon: 'text-orange-500', shadow: 'shadow-orange-100' }
-                        ][idx];
-                        
-                        return (
-                          <motion.div
-                            key={res.id}
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ delay: idx * 0.1 }}
-                            className={`${colors.bg} ${colors.border} ${colors.shadow} border-2 rounded-[2rem] p-6 relative overflow-hidden shadow-xl flex flex-col items-center text-center group cursor-pointer hover:scale-[1.02] transition-transform`}
-                            onClick={() => setSelectedResult(res)}
-                          >
-                            <div className="absolute top-4 right-4">
-                              <Trophy className={colors.icon} size={24} />
-                            </div>
-                            <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg mb-4 border-4 border-white">
-                              <span className={`text-3xl font-black ${colors.text}`}>{idx + 1}</span>
-                            </div>
-                            <h4 className="text-lg font-black text-slate-900 mb-1 line-clamp-1">
-                              {res.studentName}
-                              {res.note && (
-                                <span className="ml-1 text-[8px] text-red-500 font-bold italic">({res.note})</span>
-                              )}
-                            </h4>
-                            <div className="flex items-center gap-2 mb-4">
-                              <span className="px-2 py-0.5 bg-white/50 rounded-lg text-[10px] font-black uppercase text-slate-600 border border-white/50">Lớp {res.studentClass}</span>
-                              <span className={`text-sm font-black ${colors.text}`}>{res.score} điểm</span>
-                            </div>
-                            <button className="text-xs font-bold text-slate-500 group-hover:text-slate-900 transition-colors flex items-center gap-1">
-                              Xem chi tiết <ChevronRight size={12} />
-                            </button>
-                          </motion.div>
-                        );
-                      })}
+                    {filteredResults.slice(0, 3).map((res, idx) => {
+                      const colors = [
+                        { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', icon: 'text-amber-500', shadow: 'shadow-amber-100' },
+                        { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700', icon: 'text-slate-400', shadow: 'shadow-slate-100' },
+                        { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', icon: 'text-orange-500', shadow: 'shadow-orange-100' }
+                      ][idx] || { bg: 'bg-white', border: 'border-slate-100', text: 'text-slate-600', icon: 'text-slate-400', shadow: 'shadow-sm' };
+                      
+                      return (
+                        <motion.div
+                          key={res.id}
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: idx * 0.1 }}
+                          className={`${colors.bg} ${colors.border} ${colors.shadow} border-2 rounded-[2rem] p-6 relative overflow-hidden shadow-xl flex flex-col items-center text-center group cursor-pointer hover:scale-[1.02] transition-transform`}
+                          onClick={() => setSelectedResult(res)}
+                        >
+                          <div className="absolute top-4 right-4">
+                            <Trophy className={colors.icon} size={24} />
+                          </div>
+                          <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg mb-4 border-4 border-white">
+                            <span className={`text-3xl font-black ${colors.text}`}>{idx + 1}</span>
+                          </div>
+                          <h4 className="text-lg font-black text-slate-900 mb-1 line-clamp-1">
+                            {res.studentName}
+                            {res.note && (
+                              <span className="ml-1 text-[8px] text-red-500 font-bold italic">({res.note})</span>
+                            )}
+                          </h4>
+                          <div className="flex items-center gap-2 mb-4">
+                            <span className="px-2 py-0.5 bg-white/50 rounded-lg text-[10px] font-black uppercase text-slate-600 border border-white/50">Lớp {res.studentClass}</span>
+                            <span className={`text-sm font-black ${colors.text}`}>{res.score} điểm</span>
+                          </div>
+                          <button className="text-xs font-bold text-slate-500 group-hover:text-slate-900 transition-colors flex items-center gap-1">
+                            Xem chi tiết <ChevronRight size={12} />
+                          </button>
+                        </motion.div>
+                      );
+                    })}
                   </div>
                 )}
 
                 <div className="bg-white rounded-[2rem] shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
-                  <div className="p-6 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
+                  <div className="p-6 border-b border-slate-50 flex flex-col md:flex-row md:items-center justify-between bg-slate-50/50 gap-4">
                     <h3 className="font-black text-slate-400 uppercase tracking-widest text-xs">Danh sách xếp hạng</h3>
-                    <div className="flex gap-2">
-                      {CLASSES.map(c => (
-                        <div key={c} className="w-2 h-2 rounded-full bg-slate-200"></div>
-                      ))}
+                    
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      {/* Class Filter */}
+                      <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm">
+                        <Filter size={14} className="text-slate-400" />
+                        <select 
+                          value={adminFilterClass}
+                          onChange={(e) => setAdminFilterClass(e.target.value)}
+                          className="text-xs font-bold text-slate-600 outline-none bg-transparent"
+                        >
+                          <option value="all">Tất cả lớp</option>
+                          {CLASSES.map(c => (
+                            <option key={c} value={c}>Lớp {c}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Name Search */}
+                      <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm">
+                        <Search size={14} className="text-slate-400" />
+                        <input 
+                          type="text"
+                          value={adminSearchName}
+                          onChange={(e) => setAdminSearchName(e.target.value)}
+                          placeholder="Tìm tên học sinh..."
+                          className="text-xs font-bold text-slate-600 outline-none bg-transparent w-32 sm:w-40"
+                        />
+                      </div>
                     </div>
                   </div>
                   <div className="overflow-x-auto">
@@ -1534,13 +1568,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {results
-                          .slice()
-                          .sort((a, b) => {
-                            if (b.score !== a.score) return b.score - a.score;
-                            return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-                          })
-                          .map((res, idx) => (
+                        {filteredResults.map((res, idx) => (
                           <tr 
                             key={res.id} 
                             className={`group border-b border-slate-50 hover:bg-blue-50/40 transition-all cursor-pointer ${idx < 3 ? 'bg-blue-50/10' : ''}`}
@@ -1651,6 +1679,27 @@ export default function App() {
                             </td>
                           </tr>
                         ))}
+                        {filteredResults.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="p-20 text-center">
+                              <div className="flex flex-col items-center gap-4">
+                                <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-slate-300">
+                                  <Search size={32} />
+                                </div>
+                                <p className="text-slate-400 font-bold">Không tìm thấy kết quả nào phù hợp</p>
+                                <button 
+                                  onClick={() => {
+                                    setAdminFilterClass('all');
+                                    setAdminSearchName('');
+                                  }}
+                                  className="text-blue-600 text-xs font-bold uppercase tracking-widest hover:underline"
+                                >
+                                  Xóa bộ lọc
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
