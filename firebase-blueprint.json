@@ -7,7 +7,7 @@
       "properties": {
         "uid": { "type": "string" },
         "name": { "type": "string" },
-        "birthDate": { "type": "string", "format": "date" },
+        "birthDate": { "type": "string" },
         "class": { "type": "string", "enum": ["9A", "9B", "9C", "9D"] }
       },
       "required": ["uid", "name", "birthDate", "class"]
@@ -19,7 +19,7 @@
       "properties": {
         "uid": { "type": "string" },
         "studentName": { "type": "string" },
-        "studentBirthDate": { "type": "string", "format": "date" },
+        "studentBirthDate": { "type": "string" },
         "studentClass": { "type": "string" },
         "answers": { "type": "array" },
         "score": { "type": "number" },

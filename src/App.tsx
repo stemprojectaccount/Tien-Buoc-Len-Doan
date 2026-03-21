@@ -908,9 +908,10 @@ export default function App() {
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Ngày sinh</label>
                 <input 
-                  type="date" 
+                  type="text" 
                   value={regBirthDate}
                   onChange={(e) => setRegBirthDate(e.target.value)}
+                  placeholder="VD: 20/03/2010"
                   className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"
                 />
               </div>
@@ -1568,7 +1569,7 @@ export default function App() {
                             </td>
                             <td className="p-6">
                               <span className="text-sm font-bold text-slate-600">
-                                {new Date(res.studentBirthDate).toLocaleDateString('vi-VN')}
+                                {res.studentBirthDate}
                               </span>
                             </td>
                             <td className="p-6">
