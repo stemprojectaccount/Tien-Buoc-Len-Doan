@@ -19,19 +19,21 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'name', 'class', 'role']) &&
-             data.keys().hasOnly(['uid', 'name', 'class', 'role']) &&
+      return data.keys().hasAll(['uid', 'name', 'birthDate', 'class', 'role']) &&
+             data.keys().hasOnly(['uid', 'name', 'birthDate', 'class', 'role']) &&
              data.uid is string && data.uid.size() < 128 &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.birthDate is string &&
              data.class in ['9A', '9B', '9C', '9D'] &&
              data.role in ['student', 'admin'];
     }
 
     function isValidResult(data) {
-      return data.keys().hasAll(['uid', 'studentName', 'studentClass', 'answers', 'score', 'timestamp']) &&
-             data.keys().hasOnly(['uid', 'studentName', 'studentClass', 'answers', 'score', 'timestamp', 'note', 'screenshotUrl']) &&
+      return data.keys().hasAll(['uid', 'studentName', 'studentBirthDate', 'studentClass', 'answers', 'score', 'timestamp']) &&
+             data.keys().hasOnly(['uid', 'studentName', 'studentBirthDate', 'studentClass', 'answers', 'score', 'timestamp', 'note', 'screenshotUrl']) &&
              data.uid is string && data.uid.size() < 128 &&
              data.studentName is string && data.studentName.size() < 100 &&
+             data.studentBirthDate is string &&
              data.studentClass is string &&
              data.answers is map && data.answers.size() <= 21 &&
              data.score is number && data.score >= 0 && data.score <= 20 &&

@@ -53,6 +53,7 @@ import Markdown from 'react-markdown';
 interface UserProfile {
   uid: string;
   name: string;
+  birthDate: string;
   class: '9A' | '9B' | '9C' | '9D';
   role: 'student' | 'admin';
 }
@@ -80,6 +81,7 @@ interface QuizResult {
   id: string;
   uid: string;
   studentName: string;
+  studentBirthDate: string;
   studentClass: string;
   answers: { [key: number]: string };
   score: number;
@@ -366,6 +368,7 @@ export default function App() {
   
   // Registration state
   const [regName, setRegName] = useState('');
+  const [regBirthDate, setRegBirthDate] = useState('');
   const [regClass, setRegClass] = useState<UserProfile['class']>('9A');
 
   // Quiz state
@@ -576,6 +579,7 @@ export default function App() {
         const adminProfile: UserProfile = {
           uid: u.uid,
           name: 'Giáo viên',
+          birthDate: '1980-01-01',
           class: '9A',
           role: 'admin'
         };
@@ -590,14 +594,18 @@ export default function App() {
 
   const handleRegister = async () => {
     const trimmedName = regName.trim();
-    if (!trimmedName) return;
+    if (!trimmedName || !regBirthDate) {
+      setNotification({ message: 'Vui lòng nhập đầy đủ thông tin!', type: 'info' });
+      return;
+    }
     setIsRegistering(true);
     
     try {
-      // Check if user already exists with this name and class
+      // Check if user already exists with this name, birthDate and class
       const q = query(
         collection(db, 'users'), 
         where('name', '==', trimmedName), 
+        where('birthDate', '==', regBirthDate),
         where('class', '==', regClass)
       );
       const querySnapshot = await getDocs(q);
@@ -626,6 +634,7 @@ export default function App() {
         userProfile = {
           uid,
           name: trimmedName,
+          birthDate: regBirthDate,
           class: regClass,
           role: 'student'
         };
@@ -697,6 +706,7 @@ export default function App() {
     const result: Omit<QuizResult, 'id'> = {
       uid: profile.uid,
       studentName: profile.name,
+      studentBirthDate: profile.birthDate,
       studentClass: profile.class,
       answers,
       score,
@@ -896,6 +906,15 @@ export default function App() {
                 />
               </div>
               <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Ngày sinh</label>
+                <input 
+                  type="date" 
+                  value={regBirthDate}
+                  onChange={(e) => setRegBirthDate(e.target.value)}
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"
+                />
+              </div>
+              <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Lớp</label>
                 <div className="grid grid-cols-4 gap-2">
                   {CLASSES.map(c => (
@@ -915,7 +934,7 @@ export default function App() {
               </div>
               <button 
                 onClick={handleRegister}
-                disabled={!regName || isRegistering}
+                disabled={!regName || !regBirthDate || isRegistering}
                 className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed mt-4 active:scale-95 flex items-center justify-center gap-2"
               >
                 {isRegistering ? (
@@ -1500,6 +1519,7 @@ export default function App() {
                         <tr className="border-b border-slate-100 bg-slate-50/30">
                           <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest w-20 text-center">Hạng</th>
                           <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Học sinh</th>
+                          <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ngày sinh</th>
                           <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Lớp</th>
                           <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Điểm TN</th>
                           <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden md:table-cell">Thời gian</th>
@@ -1545,6 +1565,11 @@ export default function App() {
                                   </span>
                                 )}
                               </div>
+                            </td>
+                            <td className="p-6">
+                              <span className="text-sm font-bold text-slate-600">
+                                {new Date(res.studentBirthDate).toLocaleDateString('vi-VN')}
+                              </span>
                             </td>
                             <td className="p-6">
                               <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black uppercase group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors border border-slate-200/50">

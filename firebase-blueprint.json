@@ -7,9 +7,10 @@
       "properties": {
         "uid": { "type": "string" },
         "name": { "type": "string" },
+        "birthDate": { "type": "string", "format": "date" },
         "class": { "type": "string", "enum": ["9A", "9B", "9C", "9D"] }
       },
-      "required": ["uid", "name", "class"]
+      "required": ["uid", "name", "birthDate", "class"]
     },
     "QuizResult": {
       "title": "QuizResult",
@@ -18,12 +19,13 @@
       "properties": {
         "uid": { "type": "string" },
         "studentName": { "type": "string" },
+        "studentBirthDate": { "type": "string", "format": "date" },
         "studentClass": { "type": "string" },
         "answers": { "type": "array" },
         "score": { "type": "number" },
         "timestamp": { "type": "string", "format": "date-time" }
       },
-      "required": ["uid", "studentName", "studentClass", "answers", "score", "timestamp"]
+      "required": ["uid", "studentName", "studentBirthDate", "studentClass", "answers", "score", "timestamp"]
     }
   },
   "firestore": {
